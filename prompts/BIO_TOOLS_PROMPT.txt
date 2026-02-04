@@ -1,0 +1,17 @@
+# BIO TOOLS
+
+## pubmed_search
+Search PubMed for scientific literature.
+Format: [TOOL_CALLS]pubmed_search[ARGS]{"query": "string", "max_results": number}
+
+## ncbi_gene
+Get gene information from NCBI.
+Format: [TOOL_CALLS]ncbi_gene[ARGS]{"genes": ["gene1", "gene2"]}
+
+## crispr_designer
+Design CRISPR sgRNAs for target genes.
+Format: [TOOL_CALLS]crispr_designer[ARGS]{"target_genes": ["gene1"], "sgrnas_per_gene": 3}
+
+## protocol_builder
+Build experimental protocols.
+Format: [TOOL_CALLS]protocol_builder[ARGS]{"experiment_type": "crispr_screen", "duration_weeks": 6}

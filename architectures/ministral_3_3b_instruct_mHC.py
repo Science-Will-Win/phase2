@@ -46,28 +46,28 @@ from .ministral_3_3b_instruct import (
 # ============================================================================
 
 class Ministral3mHCFileConfig:
-    """모델 관련 파일 경로/역할 지정 (mHC 버전)"""
+    """Model-related file paths/roles configuration (mHC version)"""
     
-    # 기본 경로 (원본 모델과 동일한 파일 사용)
+    # Base path (uses same files as original model)
     BASE_PATH: str = "model/ministral_3_3b_instruct"
     
-    # 다운로드용
+    # For download
     HF_REPO_ID: str = "mistralai/Ministral-3-3B-Instruct-2512"
     
-    # === 모델 설정 ===
+    # === Model config ===
     PARAMS: str = "params.json"
     GENERATION_CONFIG: str = "generation_config.json"
     
-    # === 토크나이저 관련 ===
+    # === Tokenizer related ===
     TOKENIZER: str = "tokenizer.json"
     TOKENIZER_CONFIG: str = "tokenizer_config.json"
     SPECIAL_TOKENS_MAP: str = "special_tokens_map.json"
     TEKKEN: str = "tekken.json"
     
-    # === 프로세서 ===
+    # === Processor ===
     PROCESSOR_CONFIG: str = "processor_config.json"
     
-    # === 채팅/프롬프트 ===
+    # === Chat/Prompt ===
     CHAT_TEMPLATE: str = "chat_template.jinja"
     SYSTEM_PROMPT: str = "SYSTEM_PROMPT.txt"
 

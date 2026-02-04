@@ -1,20 +1,82 @@
 
 import os
 import torch
+import torch.nn as nn
 import argparse
 import importlib
 import inspect
-import shutil
 from huggingface_hub import snapshot_download
 from transformers import PreTrainedModel, PretrainedConfig
 # from ministral_3b import MinistralForCausalLM, MinistralConfig (Removed explicit import)
 import model_loader
 from utils import get_file_config
 
+
+# ============================================================================
+# DataParallel Utility Functions
+# ============================================================================
+
+def maybe_wrap_dataparallel(model):
+    """Wrap model with DataParallel if multiple GPUs are available.
+    
+    Args:
+        model: PyTorch model to potentially wrap
+        
+    Returns:
+        DataParallel-wrapped model if multiple GPUs, otherwise original model
+    """
+    if torch.cuda.device_count() > 1:
+        print(f"[INFO] Using DataParallel with {torch.cuda.device_count()} GPUs")
+        model = nn.DataParallel(model)
+    return model
+
+
+def get_model_device(model):
+    """Get device of a model, handling DataParallel wrapper.
+    
+    Args:
+        model: PyTorch model (may be wrapped in DataParallel)
+        
+    Returns:
+        torch.device where the model parameters reside
+    """
+    if isinstance(model, nn.DataParallel):
+        return next(model.module.parameters()).device
+    return next(model.parameters()).device
+
+
+def get_unwrapped_model(model):
+    """Get the underlying model (unwrap DataParallel if needed).
+    
+    Args:
+        model: PyTorch model (may be wrapped in DataParallel)
+        
+    Returns:
+        The underlying model without DataParallel wrapper
+    """
+    if isinstance(model, nn.DataParallel):
+        return model.module
+    return model
+
+
+# ============================================================================
+
 # Dictionary to store default configurations
 # Keys must match the model_type (filename)
 MODEL_CONFIGS = {
     "ministral_3_3b_instruct": {
+        "hidden_size": 3072,
+        "num_hidden_layers": 26,
+        "num_attention_heads": 32,
+        "num_key_value_heads": 8,
+        "intermediate_size": 9216,
+        "vocab_size": 131072,
+        "max_position_embeddings": 262144,
+        "rope_theta": 1000000.0,
+        "rms_norm_eps": 1e-5,
+        "tie_word_embeddings": True,
+    },
+    "ministral_3_3b_reasoning": {
         "hidden_size": 3072,
         "num_hidden_layers": 26,
         "num_attention_heads": 32,
@@ -97,9 +159,11 @@ def add_model_args(parser: argparse.ArgumentParser):
     group.add_argument("--max_position_embeddings", type=int, default=None)
     group.add_argument("--rope_theta", type=float, default=None)
     
-    group.add_argument("--torch_dtype", type=str, default=None, 
-                       choices=["auto", "float16", "bfloat16", "float32"],
-                       help="Precision to load model weights. Defaults to 'auto' (config.torch_dtype).")
+    group.add_argument("--quantization", type=str, default="fp8",
+                       choices=["fp8", "bf16", "fp16", "fp32"],
+                       help="Model weight precision. "
+                            "fp8=FP8 storage→BF16 compute (default), "
+                            "bf16/fp16/fp32=pure precision")
     
     return parser
 
@@ -109,9 +173,6 @@ def get_model(args):
     Dynamically imports the module named args.model_type.
     """
     model_type = args.model_type
-    
-    # Always use custom implementation from {model_type}.py
-    use_official_transformers = False
     
     try:
         model_module = importlib.import_module(f"architectures.{model_type}")
@@ -167,17 +228,7 @@ def get_model(args):
     if os.path.exists(config_path):
         print(f"[DEBUG] Loading configuration from {config_path}...")
         try:
-            # For official transformers Mistral3, we need to fix text_config.model_type
-            if use_official_transformers:
-                import json
-                with open(config_path, 'r') as f:
-                    config_dict = json.load(f)
-                # Fix text_config model_type to be recognized by transformers
-                if 'text_config' in config_dict and config_dict['text_config'].get('model_type') == 'ministral3':
-                    config_dict['text_config']['model_type'] = 'mistral'
-                config = config_class(**config_dict)
-            else:
-                config = config_class.from_pretrained(load_path)
+            config = config_class.from_pretrained(load_path)
         except Exception as e:
             print(f"[DEBUG] Error loading config from {config_path}: {e}")
     
@@ -203,29 +254,24 @@ def get_model(args):
     
     print(f"[DEBUG] Final Configuration: {config}")
 
-    # Determine Target Dtype systematically
-    target_dtype = None
-    if args.torch_dtype and args.torch_dtype != "auto":
-        target_dtype = getattr(torch, args.torch_dtype)
-    else:
-        # Try to extract from config
-        config_dict = config.to_dict()
-        dtype_val = config_dict.get("torch_dtype") or config_dict.get("dtype")
-        if dtype_val:
-            if isinstance(dtype_val, str):
-                target_dtype = getattr(torch, dtype_val, None)
-            else:
-                target_dtype = dtype_val
+    # Determine quantization mode and target dtype
+    quantization = getattr(args, 'quantization', 'fp8')
     
-    # If target_dtype is still None here, it means neither CLI nor Config specified it.
-    # We leave it as None, so the model initializes in standard default (usually FP32).
-
-    # If target_dtype is still None, defaults to FP32.
-    print(f"[DEBUG] Initializing {model_type} with detected/specified dtype: {target_dtype}")
+    # Map quantization to target dtype
+    dtype_map = {
+        "fp8": torch.bfloat16,   # FP8 storage → BF16 compute
+        "bf16": torch.bfloat16,
+        "fp16": torch.float16,
+        "fp32": torch.float32,
+    }
+    target_dtype = dtype_map.get(quantization, torch.bfloat16)
     
-    # Initialize directly on GPU if available to avoid CPU RAM spike (FP32 Init = 13GB)
-    # User reported "VRAM not accessed", implying CPU OOM.
+    print(f"[DEBUG] Quantization mode: {quantization}, Target dtype: {target_dtype}")
+    
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    # Initialize model directly on GPU to avoid CPU RAM spike
+    print(f"[DEBUG] Initializing {model_type} with dtype: {target_dtype}")
     
     try:
         with torch.device(device):
@@ -234,7 +280,7 @@ def get_model(args):
         print(f"[WARNING] Failed to init on {device}: {e}. Falling back to CPU.")
         model = model_class(config)
 
-    # Cast strictly to target dtype immediately to save memory
+    # Cast to target dtype
     if target_dtype:
         model.to(dtype=target_dtype)
         
@@ -263,28 +309,7 @@ def get_model(args):
             
         if is_weight_folder:
             print(f"[DEBUG] Found model weights at {load_path}. Loading...")
-            
-            # For official transformers, use from_pretrained which handles FP8 and key mapping
-            if use_official_transformers:
-                print("[DEBUG] Using transformers from_pretrained for weight loading...")
-                try:
-                    # Reload model with weights using from_pretrained
-                    model = model_class.from_pretrained(
-                        load_path,
-                        config=config,
-                        torch_dtype=target_dtype,
-                        device_map=device,
-                        trust_remote_code=True,
-                        low_cpu_mem_usage=True,
-                    )
-                    print(f"[DEBUG] Model loaded via from_pretrained on {device}")
-                except Exception as e:
-                    print(f"[DEBUG] from_pretrained failed: {e}")
-                    print("[DEBUG] Falling back to custom model_loader...")
-                    model = model_loader.load_model_weights(model, load_path, load_until=args.load_until_layer)
-            else:
-                # Custom implementation - use model_loader
-                model = model_loader.load_model_weights(model, load_path, load_until=args.load_until_layer)
+            model = model_loader.load_model_weights(model, load_path, load_until=args.load_until_layer)
         else:
             print("\n" + "!"*50)
             print(f"[WARNING] Directory {load_path} exists but NO WEIGHTS found.")
@@ -303,7 +328,7 @@ def get_model(args):
             model, 
             args.base_model_path, 
             device=device, 
-            dtype=dtype
+            dtype=target_dtype
         )
     
     # Freeze layers if requested

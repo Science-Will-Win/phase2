@@ -7,6 +7,13 @@ from .ministral_3_3b_instruct import (
     Ministral3TokenConfig,
 )
 
+# Reasoning model variant
+from .ministral_3_3b_reasoning import (
+    Mistral3Config as Mistral3Config_Reasoning,
+    Mistral3ForConditionalGeneration as Mistral3ForConditionalGeneration_Reasoning,
+    Ministral3TokenConfig as Ministral3TokenConfig_Reasoning,
+)
+
 # Optional: mHC variant
 try:
     from .ministral_3_3b_instruct_mHC import (

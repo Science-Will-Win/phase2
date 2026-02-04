@@ -11,252 +11,398 @@ DETAILED_HELP = {
     # ===================
     # Common Arguments
     # ===================
-    "model": """--model: 사용할 모델 지정
+    "model": """--model: Specify the model to use
 
 Usage:
-  --model ministral_3_3b_instruct     기본 모델
-  --model train/my_finetuned          학습된 모델 (model/train/ 에서 검색)
+  --model ministral_3_3b_instruct     Default model
+  --model train/my_finetuned          Fine-tuned model (searched in model/train/)
 
-모델 경로 검색 순서:
+Model path search order:
   1. model/{model_name}/
   2. model/train/{model_name}/
 """,
 
-    "data_path": """--data_path: 데이터 파일 경로
+    "data_path": """--data_path: Data file path
 
 Usage:
-  --data_path sample.json             data/ 폴더 기준 상대 경로
-  --data_path /absolute/path.json     절대 경로
+  --data_path sample.json             Relative path from data/ folder
+  --data_path /absolute/path.json     Absolute path
 
-데이터 형식:
-  - JSON 파일
-  - 각 항목에 "instruction" 또는 "text" 필드 필요
+Data format:
+  - JSON file
+  - Each item requires "instruction" or "text" field
 """,
 
-    "max_length": """--max_length: 최대 생성 토큰 수
+    "max_length": """--max_length: Maximum number of tokens to generate
 
 Usage:
-  --max_length 512      짧은 응답
-  --max_length 2048     중간 응답
-  --max_length 32768    긴 응답 (기본값)
+  --max_length 512      Short response
+  --max_length 2048     Medium response
+  --max_length 32768    Long response (default)
 
-참고:
-  - 모델의 max_position_embeddings (262144) 이내여야 함
-  - 높을수록 메모리 사용량 증가
+Note:
+  - Must be within model's max_position_embeddings (262144)
+  - Higher values increase memory usage
 """,
 
-    "temperature": """--temperature: 샘플링 온도
+    "temperature": """--temperature: Sampling temperature
 
 Usage:
-  --temperature 0.3     보수적, 일관된 출력
-  --temperature 0.7     균형 (기본값)
-  --temperature 1.0     창의적
-  --temperature 1.5+    매우 다양하지만 불안정
+  --temperature 0.3     Conservative, consistent output
+  --temperature 0.7     Balanced (default)
+  --temperature 1.0     Creative
+  --temperature 1.5+    Highly diverse but unstable
 
-특성:
-  - 낮을수록: 확률 높은 토큰 선호, 반복적
-  - 높을수록: 다양하지만 오류 가능성 증가
+Characteristics:
+  - Lower: Prefers high-probability tokens, more repetitive
+  - Higher: More diverse but increased error likelihood
 """,
 
-    "temperatures": """--temperatures: 다중 온도 설정 (RLHF용)
+    "temperatures": """--temperatures: Multiple temperature settings (for RLHF)
 
 Usage:
-  --temperatures 0.5,0.7,1.0,1.2      4개 응답 생성 (기본값)
-  --temperatures 0.3,0.5              2개 응답 생성
+  --temperatures 0.5,0.7,1.0,1.2      Generate 4 responses (default)
+  --temperatures 0.3,0.5              Generate 2 responses
 
-각 온도에 대해 별도의 응답이 생성되어 비교 가능
+Separate responses are generated for each temperature for comparison
 """,
 
     # ===================
     # Refusal Mechanism
     # ===================
-    "refusal_threshold": """--refusal_threshold: 불확실성 임계값
+    "refusal_threshold": """--refusal_threshold: Uncertainty threshold
 
-토큰 생성 시 logits의 표준편차가 이 값을 초과하면 거부하고 온도를 낮춤.
+When the standard deviation of logits exceeds this value during token generation,
+the token is rejected and temperature is lowered.
 
 Usage:
-  --refusal_threshold 1.5    엄격 (자주 거부)
-  --refusal_threshold 3.0    기본값
-  --refusal_threshold 5.0    관대 (거의 거부 안 함)
+  --refusal_threshold 1.5    Strict (frequent rejections)
+  --refusal_threshold 3.0    Default
+  --refusal_threshold 5.0    Lenient (rare rejections)
 
-동작:
-  uncertainty > threshold → 거부 → temp *= temp_decay → 재시도
+Behavior:
+  uncertainty > threshold → reject → temp *= temp_decay → retry
 """,
 
-    "refusal_max_retries": """--refusal_max_retries: 토큰당 최대 재시도 횟수
+    "refusal_max_retries": """--refusal_max_retries: Maximum retries per token
 
 Usage:
-  --refusal_max_retries 3    기본값
-  --refusal_max_retries 5    더 많은 재시도
+  --refusal_max_retries 3    Default
+  --refusal_max_retries 5    More retries
 
-재시도마다 온도가 낮아짐 (temp_decay 적용)
+Temperature decreases with each retry (temp_decay applied)
 """,
 
-    "refusal_temp_decay": """--refusal_temp_decay: 재시도 시 온도 감소율
+    "refusal_temp_decay": """--refusal_temp_decay: Temperature decay rate on retry
 
 Usage:
-  --refusal_temp_decay 0.8    기본값 (20% 감소)
-  --refusal_temp_decay 0.5    급격한 감소
+  --refusal_temp_decay 0.8    Default (20% decrease)
+  --refusal_temp_decay 0.5    Rapid decrease
 
-예시 (temp=1.0, decay=0.8):
+Example (temp=1.0, decay=0.8):
   retry 1: 1.0 × 0.8 = 0.8
   retry 2: 0.8 × 0.8 = 0.64
   retry 3: 0.64 × 0.8 = 0.512
 """,
 
-    "refusal_min_temp": """--refusal_min_temp: 최소 온도 하한
+    "refusal_min_temp": """--refusal_min_temp: Minimum temperature lower bound
 
 Usage:
-  --refusal_min_temp 0.4    기본값
-  --refusal_min_temp 0.1    더 낮은 하한 허용
+  --refusal_min_temp 0.4    Default
+  --refusal_min_temp 0.1    Allow lower bound
 
-온도가 이 값 아래로 내려가지 않음
+Temperature will not drop below this value
 """,
 
-    "refusal_recovery_tokens": """--refusal_recovery_tokens: 온도 회복에 필요한 토큰 수
+    "refusal_recovery_tokens": """--refusal_recovery_tokens: Tokens needed for temperature recovery
 
 Usage:
-  --refusal_recovery_tokens 3    기본값
-  --refusal_recovery_tokens 5    더 천천히 회복
+  --refusal_recovery_tokens 3    Default
+  --refusal_recovery_tokens 5    Slower recovery
 
-거부 후 원래 온도로 돌아가는 데 필요한 토큰 수
+Number of tokens required to return to original temperature after rejection
 """,
 
-    "refusal_recovery_method": """--refusal_recovery_method: 온도 회복 곡선
+    "refusal_recovery_method": """--refusal_recovery_method: Temperature recovery curve
 
 Available:
-  linear        일정한 속도로 회복
-  exponential   처음 빠르게, 나중에 느리게 (기본값)
-  ease_out      처음 빠르게, 끝에서 부드럽게
-  ease_in_out   처음과 끝이 부드럽게
-  step          마지막 토큰에서 즉시 회복
+  linear        Constant rate recovery
+  exponential   Fast at first, slower later (default)
+  ease_out      Fast at first, smooth at end
+  ease_in_out   Smooth at both start and end
+  step          Instant recovery at last token
 
 Usage:
   --refusal_recovery_method exponential
 """,
 
-    "no_refusal": """--no_refusal: Refusal mechanism 비활성화
+    "no_refusal": """--no_refusal: Disable refusal mechanism
 
 Usage:
   --no_refusal
 
-이 옵션을 사용하면 불확실성 기반 거부 없이 일반 샘플링만 수행
+Uses standard sampling without uncertainty-based rejection
 """,
 
     # ===================
     # Training Arguments
     # ===================
-    "loss_type": """--loss_type: 손실 함수 유형
+    "loss_type": """--loss_type: Loss function type
 
 Available:
   cross_entropy
-    - 표준 Cross Entropy Loss
-    - 가장 기본적인 언어 모델 학습
+    - Standard Cross Entropy Loss
+    - Basic language model training
 
   heteroscedastic_cross_entropy
-    - 불확실성 학습 포함 (Kendall & Gal, 2017)
-    - 모델이 자신의 불확실성을 학습
-    - 출력에 log_variance 포함
+    - Includes uncertainty learning (Kendall & Gal, 2017)
+    - Model learns its own uncertainty
 
   gdpo
-    - Grouped Direct Preference Optimization
-    - 선호도 기반 학습
-    - 여러 응답 생성 후 보상 기반 최적화
+    - Group reward-Decoupled Policy Optimization
+    - 3 objectives: Format, Length, Accuracy
+    - Add 4th objective (Temperature) with --gdpo_use_temperature_contrastive
 
   heteroscedastic_gdpo
-    - GDPO + 불확실성 학습
-    - 선호도 최적화 + 불확실성 추정
+    - GDPO + Uncertainty Reward (4 objectives)
+    - Format, Length, Accuracy, Uncertainty
+    - Integrates uncertainty as reward (not separate loss)
+    - Add 5th objective (Temperature) with --gdpo_use_temperature_contrastive
 
 Usage:
   --loss_type cross_entropy
+  --loss_type gdpo
   --loss_type heteroscedastic_gdpo
+  --loss_type heteroscedastic_gdpo --gdpo_use_temperature_contrastive
+
+Related arguments:
+  GDPO common:
+    --gdpo_group_size, --gdpo_kl_coef, --gdpo_temperature
+    --gdpo_reward_weight_format, --gdpo_reward_weight_length, --gdpo_reward_weight_accuracy
+  
+  Temperature Contrastive:
+    --gdpo_use_temperature_contrastive
+    --gdpo_low_temperature, --gdpo_high_temperature
+    --gdpo_reward_weight_temperature
+  
+  Uncertainty (heteroscedastic_gdpo):
+    --gdpo_uncertainty_threshold
+    --gdpo_reward_weight_uncertainty
 """,
 
-    "epochs": """--epochs: 학습 에폭 수
+    "epochs": """--epochs: Number of training epochs
 
 Usage:
-  --epochs 1    빠른 학습 (기본값)
-  --epochs 3    일반적인 fine-tuning
-  --epochs 10   작은 데이터셋
+  --epochs 1    Fast training (default)
+  --epochs 3    Typical fine-tuning
+  --epochs 10   Small datasets
 
-참고: 과적합 주의
+Note: Watch for overfitting
 """,
 
-    "batch_size": """--batch_size: 배치 크기
+    "batch_size": """--batch_size: Batch size
 
 Usage:
-  --batch_size 1    메모리 절약
-  --batch_size 2    기본값
-  --batch_size 4    빠른 학습 (메모리 충분 시)
+  --batch_size 1    Memory saving
+  --batch_size 2    Default
+  --batch_size 4    Faster training (with sufficient memory)
 
-GPU 메모리에 따라 조절
+Adjust based on GPU memory
 """,
 
-    "learning_rate": """--learning_rate: 학습률
+    "learning_rate": """--learning_rate: Learning rate
 
 Usage:
-  --learning_rate 2e-5    기본값 (fine-tuning 권장)
-  --learning_rate 1e-5    안정적
-  --learning_rate 5e-5    빠른 학습
+  --learning_rate 2e-5    Default (recommended for fine-tuning)
+  --learning_rate 1e-5    Stable
+  --learning_rate 5e-5    Faster training
 
-너무 높으면 발산, 너무 낮으면 학습 느림
+Too high causes divergence, too low slows learning
 """,
 
-    "gdpo_group_size": """--gdpo_group_size: GDPO 그룹 크기
+    "gdpo_group_size": """--gdpo_group_size: GDPO group size
 
 Usage:
-  --gdpo_group_size 4    기본값
+  --gdpo_group_size 4    Default
 
-각 프롬프트에 대해 생성할 응답 수
-그룹 내에서 보상 기반으로 선호도 학습
+Number of responses to generate per prompt
+Learns preference based on rewards within the group
 """,
 
-    "gdpo_kl_coef": """--gdpo_kl_coef: KL 발산 패널티 계수
+    "gdpo_kl_coef": """--gdpo_kl_coef: KL divergence penalty coefficient
 
 Usage:
-  --gdpo_kl_coef 0.01    기본값
-  --gdpo_kl_coef 0.1     강한 정규화
+  --gdpo_kl_coef 0.01    Default
+  --gdpo_kl_coef 0.1     Strong regularization
 
-원본 모델에서 너무 벗어나지 않도록 제어
+Controls deviation from the original model
 """,
 
-    "heteroscedastic_T": """--heteroscedastic_T: Monte Carlo 샘플 수
+    "gdpo_use_conditioned_rewards": """--gdpo_use_conditioned_rewards: Enable conditioned rewards
 
 Usage:
-  --heteroscedastic_T 3    기본값 (메모리 효율적)
-  --heteroscedastic_T 10   더 정확한 불확실성 추정
+  --gdpo_use_conditioned_rewards
 
-높을수록 정확하지만 메모리/시간 증가
+Behavior:
+  Easy rewards (Format, Length) are conditioned on difficult rewards.
+  Easy rewards are only given when ALL difficult conditions are met.
+
+  Difficult rewards and conditions:
+  1. Accuracy >= condition_threshold (always checked)
+  2. Uncertainty < uncertainty_threshold (only when heteroscedastic_gdpo)
+
+  AND Logic (both must be satisfied):
+  | Accuracy | Uncertainty | Easy Rewards |
+  |----------|-------------|--------------|
+  | High     | Low         | Given        |
+  | High     | High        | NOT Given    |
+  | Low      | Low         | NOT Given    |
+  | Low      | High        | NOT Given    |
+
+  For standard GDPO (without uncertainty), only accuracy is checked.
+
+Related:
+  --gdpo_condition_threshold: Accuracy threshold
+  --gdpo_uncertainty_threshold: Uncertainty threshold
 """,
 
-    "random_seed": """--random_seed: 랜덤 시드
+    "gdpo_condition_threshold": """--gdpo_condition_threshold: Accuracy threshold for conditioned rewards
 
 Usage:
-  --random_seed -1     무작위 (기본값)
-  --random_seed 42     재현 가능한 결과
+  --gdpo_condition_threshold 1.0    Default (requires perfect accuracy)
+  --gdpo_condition_threshold 0.5    More lenient
 
--1이면 매번 다른 결과, 양수면 동일 결과 재현
+When --gdpo_use_conditioned_rewards is enabled, easy rewards (Format, Length)
+are only given if accuracy meets or exceeds this threshold.
+
+Works in conjunction with --gdpo_uncertainty_threshold when using heteroscedastic_gdpo.
 """,
 
-    "debug": """--debug: 디버그 모드
+    "heteroscedastic_T": """--heteroscedastic_T: Monte Carlo sample count
+
+Usage:
+  --heteroscedastic_T 3    Default (memory efficient)
+  --heteroscedastic_T 10   More accurate uncertainty estimation
+
+Higher is more accurate but increases memory/time
+""",
+
+    "random_seed": """--random_seed: Random seed
+
+Usage:
+  --random_seed -1     Random (default)
+  --random_seed 42     Reproducible results
+
+-1 for different results each time, positive for reproducibility
+""",
+
+    "debug": """--debug: Debug mode
 
 Usage:
   --debug
 
-상세 로깅 활성화:
-  - 토큰별 생성 정보
-  - 불확실성 값
-  - 온도 변화
+Enables detailed logging:
+  - Per-token generation info
+  - Uncertainty values
+  - Temperature changes
 """,
 
-    "top_k": """--top_k: Top-K 샘플링
+    "top_k": """--top_k: Top-K sampling
 
 Usage:
-  --top_k 50    기본값
-  --top_k 10    더 제한적
-  --top_k 100   더 다양
+  --top_k 50    Default
+  --top_k 10    More restrictive
+  --top_k 100   More diverse
 
-확률 상위 K개 토큰에서만 샘플링
+Samples only from top K probability tokens
+""",
+
+    # ===================
+    # GDPO Temperature Contrastive
+    # ===================
+    "gdpo_use_temperature_contrastive": """--gdpo_use_temperature_contrastive: Enable Temperature Contrastive sampling
+
+Usage:
+  --gdpo_use_temperature_contrastive
+
+Behavior:
+  When enabled:
+  - Generate G samples with low temperature (low_temp) → Chosen (positive, +1)
+  - Generate G samples with high temperature (high_temp) → Rejected (negative, -1)
+  - Train with 2G total samples
+
+  When disabled (default):
+  - Generate G samples with single temperature (gdpo_temperature)
+
+Note:
+  - Memory usage doubles (2G samples)
+  - Automatic negative sampling, no manual labeling needed
+""",
+
+    "gdpo_low_temperature": """--gdpo_low_temperature: Low temperature for chosen samples
+
+Usage:
+  --gdpo_low_temperature 0.3    Default
+  --gdpo_low_temperature 0.1    Very deterministic
+  --gdpo_low_temperature 0.5    Slightly diverse
+
+Characteristics:
+  - Low temperature → Prefers high probability tokens → Consistent output
+  - These outputs are treated as 'chosen/positive'
+
+Only used when --gdpo_use_temperature_contrastive is enabled
+""",
+
+    "gdpo_high_temperature": """--gdpo_high_temperature: High temperature for rejected samples
+
+Usage:
+  --gdpo_high_temperature 1.2    Default
+  --gdpo_high_temperature 1.0    Normal
+  --gdpo_high_temperature 1.5    Very diverse
+
+Characteristics:
+  - High temperature → Flattens probability distribution → Diverse but error-prone
+  - These outputs are treated as 'rejected/negative'
+
+Only used when --gdpo_use_temperature_contrastive is enabled
+""",
+
+    "gdpo_reward_weight_temperature": """--gdpo_reward_weight_temperature: Temperature reward weight
+
+Usage:
+  --gdpo_reward_weight_temperature 1.0    Default
+  --gdpo_reward_weight_temperature 0.5    Reduce temperature contrast effect
+
+Weight for temperature reward when --gdpo_use_temperature_contrastive is enabled
+""",
+
+    # ===================
+    # GDPO Uncertainty Reward
+    # ===================
+    "gdpo_uncertainty_threshold": """--gdpo_uncertainty_threshold: Uncertainty penalty threshold
+
+Usage:
+  --gdpo_uncertainty_threshold 0.6    Default
+  --gdpo_uncertainty_threshold 0.5    Stricter
+  --gdpo_uncertainty_threshold 0.8    More lenient
+
+Behavior:
+  soft_scaled_uncertainty >= threshold → Apply negative penalty
+  soft_scaled_uncertainty < threshold → No penalty (0)
+
+Soft Scaling: u* = u / (1 + |u|), range (0, 1)
+
+Used as 4th reward objective in heteroscedastic_gdpo
+""",
+
+    "gdpo_reward_weight_uncertainty": """--gdpo_reward_weight_uncertainty: Uncertainty reward weight
+
+Usage:
+  --gdpo_reward_weight_uncertainty 1.0    Default
+  --gdpo_reward_weight_uncertainty 0.5    Reduce uncertainty effect
+  --gdpo_reward_weight_uncertainty 2.0    Increase uncertainty effect
+
+Weight for uncertainty reward in advantage calculation for heteroscedastic_gdpo
 """,
 }
 

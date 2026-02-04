@@ -12,6 +12,21 @@ let currentMessages = [];
 let editingIndex = -1;  // -1 = 수정 모드 아님
 let pendingFiles = [];  // 첨부 파일 배열 { type: 'image'|'audio', name, data }
 let scrollLockUntil = 0;  // 스크롤 잠금 해제 시간 (timestamp)
+let currentStepQuestion = null;  // Step 질문 컨텍스트 { stepNum, tool, stepName, context, previousSteps }
+
+// Detail Panel State
+let detailPanelOpen = false;
+let detailPanelWidth = 400;  // Default width
+let detailPanelData = {
+    goal: '',
+    steps: [],
+    results: [],      // tool_result 누적
+    codes: {},        // Step별 코드 { stepIndex: { language, code, task } }
+    summaryCode: null, // 종합 코드
+    analysis: '',     // analyze_plan 결과
+    currentStep: 0
+};
+let currentCodeStep = null;  // 현재 Code 탭에서 선택된 Step
 
 // DOM Elements
 const sidebar = document.getElementById('sidebar');
@@ -29,6 +44,13 @@ const stopIcon = document.getElementById('stopIcon');
 const loadingOverlay = document.getElementById('loadingOverlay');
 const mainContent = document.querySelector('.main-content');
 const scrollToBottomBtn = document.getElementById('scrollToBottomBtn');
+
+// Detail Panel DOM Elements
+const detailPanel = document.getElementById('detailPanel');
+const detailToggle = document.getElementById('detailToggle');
+const detailClose = document.getElementById('detailClose');
+const detailResizeHandle = document.getElementById('detailResizeHandle');
+const chatArea = document.getElementById('chatArea');
 
 // ============================================
 // Initialization
@@ -94,8 +116,15 @@ function setupEventListeners() {
         }
     });
     
-    // Enter to send
+    // Enter to send, Backspace to remove tag
     messageInput.addEventListener('keydown', (e) => {
+        // Backspace로 태그 삭제 (입력창이 비어있을 때)
+        if (e.key === 'Backspace' && messageInput.value === '' && currentStepQuestion) {
+            removeStepTag();
+            e.preventDefault();
+            return;
+        }
+        
         if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
             e.preventDefault();
             sendMessage();
@@ -356,6 +385,9 @@ function renderConversationsList() {
 }
 
 async function loadConversation(id) {
+    // Hide detail panel when switching conversations
+    hideDetailPanel();
+    
     // 다른 채팅으로 이동 시 생성 중이면 중단 (현재까지 내용은 서버에서 자동 저장됨)
     if (isStreaming && currentConversationId !== id) {
         stopGeneration();
@@ -381,6 +413,9 @@ async function loadConversation(id) {
 }
 
 async function createNewChat() {
+    // Hide detail panel for new chat
+    hideDetailPanel();
+    
     // 생성 중이면 중단 (현재까지 내용은 서버에서 자동 저장됨)
     if (isStreaming) {
         stopGeneration();
@@ -415,6 +450,7 @@ async function deleteConversation(event, id) {
         if (!response.ok) throw new Error('Failed to delete conversation');
         
         if (currentConversationId === id) {
+            hideDetailPanel();
             currentConversationId = null;
             renderMessages([]);
         }
@@ -428,6 +464,9 @@ async function deleteConversation(event, id) {
 async function clearCurrentChat() {
     if (!currentConversationId) return;
     if (!confirm('Clear all messages in this conversation?')) return;
+    
+    // Hide detail panel when clearing chat
+    hideDetailPanel();
     
     try {
         const response = await fetch(`/api/conversation/${currentConversationId}/clear`, { method: 'POST' });
@@ -472,9 +511,10 @@ function createMessageHTML(message, index = -1) {
     
     let contentHTML = '';
     
-    if (!isUser && message.content) {
+    if (!isUser) {
+        // Assistant message (including empty placeholder for streaming)
         // Parse all special tokens from content
-        const parsed = parseSpecialTokens(message.content);
+        const parsed = parseSpecialTokens(message.content || '');
         
         // Render special tokens in order
         if (parsed.think) {
@@ -500,6 +540,9 @@ function createMessageHTML(message, index = -1) {
         }
         if (parsed.callId) {
             contentHTML += createCallIdBadge(parsed.callId);
+        }
+        if (parsed.planComplete) {
+            contentHTML += createCompletedPlanHTML(parsed.planComplete);
         }
         
         // Render main answer with image/audio placeholders
@@ -527,7 +570,11 @@ function createMessageHTML(message, index = -1) {
         let textContent = message.content || '';
         textContent = textContent.replace(/\[Image: [^\]]+\]\s*/g, '').replace(/\[Audio: [^\]]+\]\s*/g, '').trim();
         
-        contentHTML = filesHTML + `<div class="answer-content">${renderMarkdown(textContent)}</div>`;
+        // Render markdown and convert step tag markers
+        let renderedContent = renderMarkdown(textContent);
+        renderedContent = renderedContent.replace(/\{\{STEP_TAG:(\d+)\}\}/g, '<span class="chat-step-tag">Step $1</span>');
+        
+        contentHTML = filesHTML + `<div class="answer-content">${renderedContent}</div>`;
     }
     
     // Action buttons (only for saved messages with valid index)
@@ -598,6 +645,49 @@ function createMessageHTML(message, index = -1) {
 // Special Token Parsing
 // ============================================
 
+/**
+ * Extract a complete JSON object or array from text starting at a given position.
+ * Handles nested structures and strings with escaped characters.
+ */
+function extractJsonFromPosition(text, startPos) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    let start = -1;
+    
+    for (let i = startPos; i < text.length; i++) {
+        const char = text[i];
+        
+        if (escape) {
+            escape = false;
+            continue;
+        }
+        
+        if (char === '\\' && inString) {
+            escape = true;
+            continue;
+        }
+        
+        if (char === '"' && !escape) {
+            inString = !inString;
+            continue;
+        }
+        
+        if (!inString) {
+            if (char === '{' || char === '[') {
+                if (depth === 0) start = i;
+                depth++;
+            } else if (char === '}' || char === ']') {
+                depth--;
+                if (depth === 0) {
+                    return { json: text.substring(start, i + 1), endPos: i + 1 };
+                }
+            }
+        }
+    }
+    return null;
+}
+
 function parseSpecialTokens(content) {
     let result = {
         think: null,
@@ -605,6 +695,7 @@ function parseSpecialTokens(content) {
         toolCalls: null,
         toolResults: null,
         toolContent: null,
+        planComplete: null,
         fim: null,
         img: [],
         audio: null,
@@ -634,11 +725,58 @@ function parseSpecialTokens(content) {
         result.answer = result.answer.replace(/\[TOOL_RESULTS\][\s\S]*?\[\/TOOL_RESULTS\]/, '');
     }
     
-    // [TOOL_CALLS] (단독 토큰, 뒤에 내용이 따라옴)
-    const toolCallsMatch = result.answer.match(/\[TOOL_CALLS\]([\s\S]*?)(?=\[(?!\/)|$)/);
-    if (toolCallsMatch) {
-        result.toolCalls = toolCallsMatch[1].trim();
-        result.answer = result.answer.replace(/\[TOOL_CALLS\][\s\S]*?(?=\[(?!\/)|$)/, '');
+    // [TOOL_CALLS]tool_name[ARGS]{json} - parse as complete unit
+    const toolCallPattern = /\[TOOL_CALLS\](\w+)\[ARGS\]/;
+    const toolCallMatch = result.answer.match(toolCallPattern);
+    if (toolCallMatch) {
+        const toolName = toolCallMatch[1];
+        const argsStartPos = result.answer.indexOf('[ARGS]') + 6;
+        const extracted = extractJsonFromPosition(result.answer, argsStartPos);
+        
+        if (extracted) {
+            try {
+                const args = JSON.parse(extracted.json);
+                result.toolCalls = { name: toolName, arguments: args };
+                // Remove the entire tool call from answer
+                const toolCallStartPos = result.answer.indexOf('[TOOL_CALLS]');
+                const fullMatch = result.answer.substring(toolCallStartPos, extracted.endPos);
+                result.answer = result.answer.replace(fullMatch, '');
+            } catch (e) {
+                // JSON parse failed, fall back to simple extraction
+                result.toolCalls = toolCallMatch[1];
+                result.answer = result.answer.replace(/\[TOOL_CALLS\][\s\S]*?(?=\[(?!\/)|$)/, '');
+            }
+        } else {
+            // Could not extract JSON, fall back to simple extraction
+            result.toolCalls = toolCallMatch[1];
+            result.answer = result.answer.replace(/\[TOOL_CALLS\][\s\S]*?(?=\[(?!\/)|$)/, '');
+        }
+    } else {
+        // Fallback: [TOOL_CALLS] without [ARGS] format
+        const simpleToolCallsMatch = result.answer.match(/\[TOOL_CALLS\]([\s\S]*?)(?=\[(?!\/)|$)/);
+        if (simpleToolCallsMatch) {
+            result.toolCalls = simpleToolCallsMatch[1].trim();
+            result.answer = result.answer.replace(/\[TOOL_CALLS\][\s\S]*?(?=\[(?!\/)|$)/, '');
+        }
+    }
+    
+    // Handle incomplete tool calls (during streaming)
+    // If we see [TOOL_CALLS] but couldn't parse it completely, mark as pending
+    if (!result.toolCalls && result.answer.includes('[TOOL_CALLS]')) {
+        result.toolCalls = 'pending';
+        const toolCallStart = result.answer.indexOf('[TOOL_CALLS]');
+        result.answer = result.answer.substring(0, toolCallStart);
+    }
+    
+    // Also handle case where [ARGS] appears but JSON is incomplete
+    if (result.answer.includes('[ARGS]')) {
+        result.toolCalls = result.toolCalls || 'pending';
+        const argsStart = result.answer.indexOf('[ARGS]');
+        const toolCallStart = result.answer.indexOf('[TOOL_CALLS]');
+        result.answer = result.answer.substring(0, Math.min(
+            toolCallStart >= 0 ? toolCallStart : Infinity,
+            argsStart
+        ));
     }
     
     // [TOOL_CONTENT] (단독 토큰)
@@ -679,11 +817,13 @@ function parseSpecialTokens(content) {
         result.answer = result.answer.replace(/\[AUDIO\]|\[BEGIN_AUDIO\]/g, '{{AUDIO_PLACEHOLDER}}');
     }
     
-    // [ARGS]...(JSON until next token or end)
-    const argsMatch = result.answer.match(/\[ARGS\]([\s\S]*?)(?=\[(?!\/)|$)/);
-    if (argsMatch) {
-        result.args = argsMatch[1].trim();
-        result.answer = result.answer.replace(/\[ARGS\][\s\S]*?(?=\[(?!\/)|$)/, '');
+    // [ARGS]...(JSON until next token or end) - only if not already consumed by tool call
+    if (!result.toolCalls || typeof result.toolCalls === 'string') {
+        const argsMatch = result.answer.match(/\[ARGS\]([\s\S]*?)(?=\[(?!\/)|$)/);
+        if (argsMatch) {
+            result.args = argsMatch[1].trim();
+            result.answer = result.answer.replace(/\[ARGS\][\s\S]*?(?=\[(?!\/)|$)/, '');
+        }
     }
     
     // [CALL_ID]...(ID until next token or whitespace)
@@ -691,6 +831,18 @@ function parseSpecialTokens(content) {
     if (callIdMatch) {
         result.callId = callIdMatch[1].trim();
         result.answer = result.answer.replace(/\[CALL_ID\]\S+/, '');
+    }
+    
+    // [PLAN_COMPLETE]{json} - completed plan with results
+    const planCompleteMatch = result.answer.match(/\[PLAN_COMPLETE\]([\s\S]*)$/);
+    if (planCompleteMatch) {
+        try {
+            result.planComplete = JSON.parse(planCompleteMatch[1].trim());
+        } catch (e) {
+            // JSON parse failed, keep raw
+            result.planComplete = { raw: planCompleteMatch[1].trim() };
+        }
+        result.answer = result.answer.replace(/\[PLAN_COMPLETE\][\s\S]*$/, '');
     }
     
     result.answer = result.answer.trim();
@@ -736,14 +888,179 @@ function createToolsHTML(content) {
     `;
 }
 
+/**
+ * Create inline plan steps HTML for rendering create_plan tool calls
+ */
+function createInlinePlanStepsHTML(args) {
+    const goal = args.goal || '';
+    const steps = args.steps || [];
+    
+    // Goal header with plan reference button
+    let goalHTML = goal ? `
+        <div class="plan-goal-container">
+            <div class="plan-goal">${escapeHtml(goal)}</div>
+            <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="Plan 전체 참고하여 질문">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </button>
+        </div>
+    ` : '';
+    
+    let stepsHTML = '';
+    steps.forEach((step, index) => {
+        const stepNum = index + 1;
+        stepsHTML += `
+            <div class="plan-step pending" data-step-id="${stepNum}" data-tool="${escapeHtml(step.tool || '')}">
+                <div class="step-header">
+                    <div class="step-header-main" onclick="toggleStepResult(this.parentElement)">
+                        <div class="step-indicator">${stepNum}</div>
+                        <div class="step-content">
+                            <div class="step-name">${escapeHtml(step.name || '')}</div>
+                            <div class="step-tool">${escapeHtml(step.tool || '')}</div>
+                        </div>
+                    </div>
+                    <div class="step-actions">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); retryStep(${stepNum})" title="재시도">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6M1 20v-6h6"/>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                            </svg>
+                        </button>
+                        <button class="step-action-btn" onclick="event.stopPropagation(); editStepResult(${stepNum})" title="결과 수정">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                        </button>
+                        <button class="step-action-btn" onclick="event.stopPropagation(); askAboutStep(${stepNum})" title="질문하기">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                                <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="step-toggle" onclick="toggleStepResult(this.closest('.step-header'))" style="visibility: hidden;">▼</div>
+                </div>
+                <div class="step-result" style="display: none;"></div>
+            </div>
+        `;
+    });
+    
+    return `<div class="plan-steps-box">${goalHTML}<div class="plan-steps">${stepsHTML}</div></div>`;
+}
+
+/**
+ * Create HTML for a completed plan (loaded from saved [PLAN_COMPLETE] message)
+ */
+function createCompletedPlanHTML(planData) {
+    const goal = planData.goal || '';
+    const steps = planData.steps || [];
+    const results = planData.results || [];
+    
+    // Create a map of step index to result
+    const resultMap = {};
+    results.forEach(r => {
+        resultMap[r.step] = r;
+    });
+    
+    // Goal header with plan reference button (button inside goal bar)
+    let goalHTML = goal ? `
+        <div class="plan-goal plan-goal-row">
+            <span class="plan-goal-text">${escapeHtml(goal)}</span>
+            <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="Plan 전체 참고하여 질문">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </button>
+        </div>
+    ` : '';
+    
+    let stepsHTML = '';
+    steps.forEach((step, index) => {
+        const stepNum = index + 1;
+        const result = resultMap[stepNum];
+        const statusClass = result ? (result.success ? 'completed' : 'error') : 'pending';
+        const indicator = result ? (result.success ? '✓' : '!') : stepNum;
+        
+        let resultHTML = '';
+        if (result) {
+            // Use formatStepResult for full display (thought, action, result)
+            const formattedResult = formatStepResult({
+                success: result.success,
+                thought: result.thought,
+                action: result.action,
+                result: result.result
+            });
+            resultHTML = `<div class="step-result" style="display: block;">${formattedResult}</div>`;
+        }
+        
+        stepsHTML += `
+            <div class="plan-step ${statusClass}" data-step-id="${stepNum}" data-tool="${escapeHtml(step.tool || '')}">
+                <div class="step-header">
+                    <div class="step-header-main" onclick="toggleStepResult(this.parentElement)">
+                        <div class="step-indicator">${indicator}</div>
+                        <div class="step-content">
+                            <div class="step-name">${escapeHtml(step.name || '')}</div>
+                            <div class="step-tool">${escapeHtml(step.tool || '')}</div>
+                        </div>
+                    </div>
+                    <div class="step-actions">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); retryStep(${stepNum})" title="재시도">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6M1 20v-6h6"/>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                            </svg>
+                        </button>
+                        <button class="step-action-btn" onclick="event.stopPropagation(); editStepResult(${stepNum})" title="결과 수정">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                        </button>
+                        <button class="step-action-btn" onclick="event.stopPropagation(); askAboutStep(${stepNum})" title="질문하기">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                                <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="step-toggle" onclick="toggleStepResult(this.closest('.step-header'))" style="visibility: ${result ? 'visible' : 'hidden'};">${result ? '▲' : '▼'}</div>
+                </div>
+                ${resultHTML}
+            </div>
+        `;
+    });
+    
+    return `<div class="plan-steps-box completed-plan">${goalHTML}<div class="plan-steps">${stepsHTML}</div></div>`;
+}
+
 function createToolCallsHTML(content) {
+    // Skip if content is 'pending' (incomplete tool call that failed to parse)
+    if (content === 'pending') {
+        return '';
+    }
+    
+    // Check if content is a parsed tool call object (from new parsing)
+    if (typeof content === 'object' && content.name === 'create_plan') {
+        return createInlinePlanStepsHTML(content.arguments);
+    }
+    
+    // Fallback to existing behavior for raw string content or other tools
+    const displayContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
     return `
         <div class="special-token-container tool-calls-container">
             <div class="special-badge tool-calls-badge">
                 <span class="special-icon">⚡</span>
                 <span class="special-label">Tool Call</span>
             </div>
-            <div class="special-content"><pre>${escapeHtml(content)}</pre></div>
+            <div class="special-content"><pre>${escapeHtml(displayContent)}</pre></div>
         </div>
     `;
 }
@@ -848,6 +1165,21 @@ async function sendMessage(customContent = null) {
     
     if ((!content && files.length === 0) || isStreaming) return;
     
+    // Check for step question tag (pill-based)
+    const stepTag = document.querySelector('#inputTags .input-tag');
+    if (stepTag && currentStepQuestion && content) {
+        await sendStepQuestionFromMain(content);
+        // Clear tag after sending
+        document.getElementById('inputTags').innerHTML = '';
+        messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+        return;
+    }
+    
+    // Clear step question context if not a step question
+    currentStepQuestion = null;
+    document.getElementById('inputTags').innerHTML = '';
+    messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+    
     // 메시지 전송 시 자동 스크롤 활성화
     scrollLockUntil = 0;
     
@@ -912,13 +1244,15 @@ async function sendMessage(customContent = null) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let fullContent = '';
+        let buffer = '';  // Buffer for incomplete SSE lines
         
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n');
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();  // Keep incomplete line for next chunk
             
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
@@ -930,7 +1264,158 @@ async function sendMessage(customContent = null) {
                             updateAssistantMessage(contentDiv, fullContent);
                         }
                         
+                        // Handle tool call events
+                        if (data.tool_call) {
+                            if (data.tool_call.name === 'create_plan') {
+                                const toolBox = createPlanStepsBox(data.tool_call);
+                                contentDiv.appendChild(toolBox);
+                                scrollToBottom();
+                                
+                                // Open Detail Panel with plan data
+                                const args = data.tool_call.arguments || {};
+                                openDetailPanel({
+                                    goal: args.goal || '',
+                                    steps: (args.steps || []).map((s, i) => ({
+                                        id: i + 1,
+                                        name: s.name || '',
+                                        tool: s.tool || '',
+                                        description: s.description || ''
+                                    }))
+                                });
+                            } else {
+                                // Check if this tool is part of the current plan
+                                const planBox = document.getElementById('current-plan-box');
+                                if (planBox) {
+                                    // Find step by tool name (first pending one with matching tool)
+                                    const toolName = data.tool_call.name;
+                                    const stepEl = planBox.querySelector(`.plan-step.pending[data-tool="${toolName}"]`) ||
+                                                   planBox.querySelector(`[data-tool="${toolName}"]`);
+                                    if (stepEl) {
+                                        // Update step status to "running"
+                                        stepEl.classList.remove('pending');
+                                        stepEl.classList.add('running');
+                                        // Force visual update
+                                        void stepEl.offsetHeight;
+                                        scrollToBottom();
+                                    }
+                                }
+                                // If not part of plan, don't create separate box (cleaner UI)
+                            }
+                        }
+                        
+                        // Handle tool result events
+                        if (data.tool_result) {
+                            updateToolResultBox(data.tool_result);
+                            scrollToBottom();
+                            
+                            // Update Detail Panel with tool result
+                            if (detailPanelOpen && data.tool_result.step !== undefined) {
+                                const stepIndex = data.tool_result.step - 1; // Convert to 0-based
+                                addToolResultToDetailPanel(stepIndex, data.tool_result);
+                            }
+                        }
+                        
+                        // Handle step start events (LLM starting to generate tool call for this step)
+                        if (data.step_start) {
+                            const planBox = document.getElementById('current-plan-box');
+                            if (planBox) {
+                                const stepEl = planBox.querySelector(`[data-step-id="${data.step_start.step}"]`);
+                                if (stepEl && !stepEl.classList.contains('completed')) {
+                                    stepEl.classList.remove('pending');
+                                    stepEl.classList.add('running');
+                                    scrollToBottom();
+                                }
+                            }
+                        }
+                        
                         if (data.done) {
+                            // If plan execution completed, update plan box with results
+                            if (data.plan_complete) {
+                                // Streaming indicator 제거
+                                const streamingIndicator = contentDiv.querySelector('.streaming-indicator');
+                                if (streamingIndicator) {
+                                    streamingIndicator.remove();
+                                }
+                                
+                                const planBox = document.getElementById('current-plan-box');
+                                if (planBox) {
+                                    updatePlanBoxWithResults(planBox, data.plan_complete);
+                                }
+                                
+                                // Trigger Detail Panel completion updates
+                                if (detailPanelOpen) {
+                                    onPlanComplete();
+                                }
+                                
+                                // Update currentMessages
+                                currentMessages.push({ role: 'user', content: displayContent });
+                                currentMessages.push({ role: 'assistant', content: fullContent });
+                                
+                                // Update action buttons on BOTH messages
+                                const messageElements = messagesWrapper.querySelectorAll('.message');
+                                const userMsgIndex = currentMessages.length - 2;
+                                const assistantMsgIndex = currentMessages.length - 1;
+                                
+                                if (messageElements.length >= 2) {
+                                    const userMsgEl = messageElements[messageElements.length - 2];
+                                    const assistantMsgEl = messageElements[messageElements.length - 1];
+                                    
+                                    // Re-render user message
+                                    if (userMsgEl) {
+                                        userMsgEl.outerHTML = createMessageHTML(currentMessages[userMsgIndex], userMsgIndex);
+                                    }
+                                    
+                                    // Update assistant message action buttons WITHOUT re-rendering (to avoid duplicate plan box)
+                                    if (assistantMsgEl) {
+                                        // Set data-index attribute
+                                        assistantMsgEl.setAttribute('data-index', assistantMsgIndex);
+                                        
+                                        // Find or create actions div
+                                        let actionsDiv = assistantMsgEl.querySelector('.message-actions');
+                                        if (!actionsDiv) {
+                                            actionsDiv = document.createElement('div');
+                                            actionsDiv.className = 'message-actions';
+                                            assistantMsgEl.appendChild(actionsDiv);
+                                        }
+                                        
+                                        // Set action buttons HTML for assistant message
+                                        actionsDiv.innerHTML = `
+                                            <button class="message-action-btn" onclick="regenerateFrom(${assistantMsgIndex})" title="Regenerate">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <path d="M23 4v6h-6M1 20v-6h6"/>
+                                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                                                </svg>
+                                            </button>
+                                            <button class="message-action-btn" onclick="copyMessage(${assistantMsgIndex})" title="Copy">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                                </svg>
+                                            </button>
+                                            <button class="message-action-btn delete-btn" onclick="deleteFromMessage(${assistantMsgIndex})" title="Delete from here">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                                </svg>
+                                            </button>
+                                        `;
+                                    }
+                                }
+                                
+                                // Cancel stream and cleanup
+                                await reader.cancel();
+                                scrollToBottom();
+                                await loadConversations();
+                                return;
+                            }
+                            
+                            // Non-plan done handling: Preserve existing tool boxes
+                            const existingToolBoxes = contentDiv.querySelectorAll('.plan-steps-box, .tool-call-box');
+                            const toolBoxesToPreserve = [];
+                            existingToolBoxes.forEach(box => {
+                                box.remove();  // Detach from DOM
+                                toolBoxesToPreserve.push(box);
+                            });
+                            
                             // Final update with all special tokens
                             const parsed = parseSpecialTokens(fullContent);
                             let finalHTML = '';
@@ -941,7 +1426,8 @@ async function sendMessage(customContent = null) {
                             if (parsed.tools) {
                                 finalHTML += createToolsHTML(parsed.tools);
                             }
-                            if (parsed.toolCalls) {
+                            // Skip toolCalls if we have existing tool boxes (already displayed)
+                            if (toolBoxesToPreserve.length === 0 && parsed.toolCalls) {
                                 finalHTML += createToolCallsHTML(parsed.toolCalls);
                             }
                             if (parsed.toolResults) {
@@ -966,13 +1452,46 @@ async function sendMessage(customContent = null) {
                             finalHTML += `<div class="answer-content">${answerHTML}</div>`;
                             
                             contentDiv.innerHTML = finalHTML;
+                            
+                            // Re-append preserved tool boxes at the top
+                            toolBoxesToPreserve.forEach(box => {
+                                contentDiv.insertBefore(box, contentDiv.firstChild);
+                            });
+                            
                             renderMath();
                             
                             // Cancel stream and exit loop
                             await reader.cancel();
                             scrollToBottom();
-                            await loadConversation(currentConversationId);
-                            await loadConversations();  // Refresh sidebar to update title
+                            // Don't reload conversation - content is already rendered with plan boxes
+                            // Only refresh sidebar to update title
+                            await loadConversations();
+                            
+                            // Update currentMessages to fix action buttons (edit/copy/delete/regenerate)
+                            // Since we don't call loadConversation, we need to manually update the array
+                            currentMessages.push({ role: 'user', content: displayContent });
+                            currentMessages.push({ role: 'assistant', content: fullContent });
+                            
+                            // Update DOM elements with correct indices for action buttons
+                            const messageElements = messagesWrapper.querySelectorAll('.message');
+                            const userMsgIndex = currentMessages.length - 2;
+                            const assistantMsgIndex = currentMessages.length - 1;
+                            
+                            if (messageElements.length >= 2) {
+                                const userMsgEl = messageElements[messageElements.length - 2];
+                                const assistantMsgEl = messageElements[messageElements.length - 1];
+                                
+                                // Re-render user message with correct index
+                                if (userMsgEl) {
+                                    userMsgEl.outerHTML = createMessageHTML(currentMessages[userMsgIndex], userMsgIndex);
+                                }
+                                
+                                // Re-render assistant message (plan box is already created by createMessageHTML from saved content)
+                                if (assistantMsgEl) {
+                                    assistantMsgEl.outerHTML = createMessageHTML(currentMessages[assistantMsgIndex], assistantMsgIndex);
+                                }
+                            }
+                            
                             return;
                         }
                         
@@ -992,6 +1511,30 @@ async function sendMessage(customContent = null) {
         
         // Reload conversations to update title
         await loadConversations();
+        
+        // Update currentMessages for fallback case (if data.done wasn't received)
+        if (!currentMessages.find(m => m.role === 'user' && m.content === displayContent)) {
+            currentMessages.push({ role: 'user', content: displayContent });
+            currentMessages.push({ role: 'assistant', content: fullContent });
+            
+            // Update DOM elements with correct indices for action buttons
+            const messageElements = messagesWrapper.querySelectorAll('.message');
+            const userMsgIndex = currentMessages.length - 2;
+            const assistantMsgIndex = currentMessages.length - 1;
+            
+            if (messageElements.length >= 2) {
+                const userMsgEl = messageElements[messageElements.length - 2];
+                const assistantMsgEl = messageElements[messageElements.length - 1];
+                
+                if (userMsgEl) {
+                    userMsgEl.outerHTML = createMessageHTML(currentMessages[userMsgIndex], userMsgIndex);
+                }
+                
+                if (assistantMsgEl) {
+                    assistantMsgEl.outerHTML = createMessageHTML(currentMessages[assistantMsgIndex], assistantMsgIndex);
+                }
+            }
+        }
         
     } catch (error) {
         if (error.name === 'AbortError') {
@@ -1029,11 +1572,35 @@ function updateAssistantMessage(contentDiv, content) {
     // Show streaming content with partial special token parsing
     const parsed = parseSpecialTokens(content);
     
+    // Check for existing elements to avoid recreating them
+    const existingPlanBox = contentDiv.querySelector('.plan-steps-box');
+    const existingAnswerDiv = contentDiv.querySelector('.answer-content');
+    const existingStreamingIndicator = contentDiv.querySelector('.streaming-indicator');
+    
+    // Render main answer with placeholders
+    let answerHTML = renderMarkdown(parsed.answer);
+    answerHTML = answerHTML.replace(/\{\{IMG_PLACEHOLDER\}\}/g, createImgPlaceholder());
+    answerHTML = answerHTML.replace(/\{\{AUDIO_PLACEHOLDER\}\}/g, createAudioPlaceholder());
+    
+    // If we already have the structure, just update the answer content (reduces flicker)
+    if (existingAnswerDiv) {
+        existingAnswerDiv.innerHTML = answerHTML;
+        
+        // Ensure streaming indicator exists
+        if (!existingStreamingIndicator) {
+            const indicator = document.createElement('span');
+            indicator.className = 'streaming-indicator';
+            indicator.innerHTML = '<span class="streaming-dot"></span><span class="streaming-dot"></span><span class="streaming-dot"></span>';
+            contentDiv.appendChild(indicator);
+        }
+        return;
+    }
+    
+    // First time setup - create structure
     let html = '';
     
     // Show thinking indicator during streaming
     if (parsed.think) {
-        const preview = parsed.think.substring(0, 80).replace(/\n/g, ' ');
         html += `<div class="cot-container">
             <button class="cot-toggle" onclick="toggleSpecialToken(this)">
                 <span class="cot-icon">✦</span>
@@ -1043,8 +1610,8 @@ function updateAssistantMessage(contentDiv, content) {
         </div>`;
     }
     
-    // Show tool calls indicator during streaming
-    if (parsed.toolCalls) {
+    // Show tool calls indicator during streaming (only if no plan box exists)
+    if (parsed.toolCalls && !existingPlanBox) {
         html += `<div class="special-badge tool-calls-badge">
             <span class="special-icon">⚡</span>
             <span class="special-label">Tool Call...</span>
@@ -1059,15 +1626,17 @@ function updateAssistantMessage(contentDiv, content) {
         </div>`;
     }
     
-    // Render main answer with placeholders
-    let answerHTML = renderMarkdown(parsed.answer);
-    answerHTML = answerHTML.replace(/\{\{IMG_PLACEHOLDER\}\}/g, createImgPlaceholder());
-    answerHTML = answerHTML.replace(/\{\{AUDIO_PLACEHOLDER\}\}/g, createAudioPlaceholder());
-    
     html += `<div class="answer-content">${answerHTML}</div>`;
     html += '<span class="streaming-indicator"><span class="streaming-dot"></span><span class="streaming-dot"></span><span class="streaming-dot"></span></span>';
     
-    contentDiv.innerHTML = html;
+    // Preserve plan box if it exists
+    if (existingPlanBox) {
+        existingPlanBox.remove();
+        contentDiv.innerHTML = html;
+        contentDiv.insertBefore(existingPlanBox, contentDiv.firstChild);
+    } else {
+        contentDiv.innerHTML = html;
+    }
 }
 
 // ============================================
@@ -1708,4 +2277,1808 @@ document.getElementById('renameInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
         saveRename();
     }
+});
+
+// ============================================
+// Tool Call / Plan Box Functions
+// ============================================
+
+let toolCallBoxes = {}; // Track tool call boxes by call_id
+
+/**
+ * Create a plan steps box (for create_plan tool calls)
+ * Renders steps as numbered cards without raw JSON
+ */
+function createPlanStepsBox(toolCall) {
+    const box = document.createElement('div');
+    box.className = 'plan-steps-box';
+    box.id = 'current-plan-box';
+    
+    const args = toolCall.arguments || {};
+    const goal = args.goal || '';
+    const steps = args.steps || [];
+    
+    // Goal header
+    let goalHTML = goal ? `<div class="plan-goal">${escapeHtml(goal)}</div>` : '';
+    
+    // Steps with result placeholders and toggle
+    let stepsHTML = '';
+    steps.forEach((step, index) => {
+        const stepNum = index + 1;
+        stepsHTML += `
+            <div class="plan-step pending" data-step-id="${stepNum}" data-tool="${escapeHtml(step.tool || '')}">
+                <div class="step-header">
+                    <div class="step-header-main" onclick="toggleStepResult(this.parentElement)" ondblclick="scrollToStepOutput(${index})">
+                        <div class="step-indicator">${stepNum}</div>
+                        <div class="step-content">
+                            <div class="step-name">${escapeHtml(step.name || '')}</div>
+                            <div class="step-tool">${escapeHtml(step.tool || '')}</div>
+                        </div>
+                    </div>
+                    <div class="step-actions">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); retryStep(${stepNum})" title="재시도">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6M1 20v-6h6"/>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                            </svg>
+                        </button>
+                        <button class="step-action-btn" onclick="event.stopPropagation(); editStepResult(${stepNum})" title="결과 수정">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                        </button>
+                        <button class="step-action-btn" onclick="event.stopPropagation(); askAboutStep(${stepNum})" title="질문하기">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                                <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="step-toggle" onclick="toggleStepResult(this.closest('.step-header'))" style="visibility: hidden;">▼</div>
+                </div>
+                <div class="step-result" style="display: none;"></div>
+            </div>
+        `;
+    });
+    
+    box.innerHTML = `${goalHTML}<div class="plan-steps">${stepsHTML}</div>`;
+    toolCallBoxes['create_plan'] = box.id;
+    return box;
+}
+
+/**
+ * Toggle collapse/expand of step result section
+ */
+function toggleStepResult(header) {
+    const step = header.closest('.plan-step');
+    const result = step.querySelector('.step-result');
+    const toggle = step.querySelector('.step-toggle');
+    
+    if (result && result.innerHTML.trim()) {
+        const isHidden = result.style.display === 'none';
+        result.style.display = isHidden ? 'block' : 'none';
+        if (toggle) {
+            toggle.textContent = isHidden ? '▲' : '▼';
+        }
+    }
+}
+
+/**
+ * Toggle collapse/expand of think section
+ */
+function toggleThinkSection(toggle) {
+    const section = toggle.closest('.think-section-minimal');
+    section.classList.toggle('collapsed');
+    toggle.textContent = section.classList.contains('collapsed') ? 'Think ▶' : 'Think ▼';
+}
+
+// ============================================
+// Step Action Functions (재시도, 수정, 질문)
+// ============================================
+
+// Store for step edits (수정된 결과 저장 - 재전송 아님!)
+let stepEdits = {};
+
+/**
+ * Retry a step (재시도 - LLM이 tool select부터 다시 진행)
+ */
+async function retryStep(stepNum) {
+    if (!currentConversationId || isStreaming) return;
+    
+    const step = document.querySelector(`.plan-step[data-step-id="${stepNum}"]`);
+    if (!step) return;
+    
+    const tool = step.dataset.tool;
+    const stepName = step.querySelector('.step-name')?.textContent || '';
+    const resultEl = step.querySelector('.step-result');
+    const originalResult = resultEl?.innerText || '';
+    const userEdit = stepEdits[stepNum] || null;
+    
+    // Collect plan context
+    const planBox = step.closest('.plan-steps-box');
+    const planGoal = planBox?.querySelector('.plan-goal')?.textContent || '';
+    
+    // Collect previous steps with results
+    const allSteps = planBox?.querySelectorAll('.plan-step') || [];
+    const previousSteps = [];
+    allSteps.forEach(s => {
+        const sNum = parseInt(s.dataset.stepId);
+        if (sNum < stepNum) {
+            previousSteps.push({
+                num: sNum,
+                name: s.querySelector('.step-name')?.textContent || '',
+                result: s.querySelector('.step-result')?.innerText || ''
+            });
+        }
+    });
+    
+    try {
+        // Show loading state
+        step.classList.remove('completed', 'error');
+        step.classList.add('running');
+        resultEl.innerHTML = '<div class="step-loading">LLM이 재생성 중...</div>';
+        resultEl.style.display = 'block';
+        
+        const response = await fetch('/retry_step', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conv_id: currentConversationId,
+                step_num: stepNum,
+                tool: tool,
+                step_name: stepName,
+                original_result: originalResult,
+                user_edit: userEdit,
+                plan_goal: planGoal,
+                previous_steps: previousSteps
+            })
+        });
+        
+        if (response.ok) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let llmText = '';
+            let toolResultContent = '';
+            let buffer = '';  // Buffer for incomplete SSE lines
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();  // Keep incomplete line for next chunk
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            
+                            // LLM token streaming
+                            if (data.token) {
+                                llmText += data.token;
+                                // Show LLM thinking (optional)
+                            }
+                            
+                            // Tool call started
+                            if (data.tool_call) {
+                                resultEl.innerHTML = `<div class="step-loading">${data.tool_call.name} 실행 중...</div>`;
+                            }
+                            
+                            // Tool result received
+                            if (data.tool_result) {
+                                toolResultContent = formatStepResult(data.tool_result.result);
+                                resultEl.innerHTML = toolResultContent;
+                            }
+                            
+                            // Legacy: direct result (for backward compatibility)
+                            if (data.result) {
+                                toolResultContent = formatStepResult(data.result);
+                                resultEl.innerHTML = toolResultContent;
+                            }
+                            
+                            if (data.done) {
+                                step.classList.remove('running');
+                                step.classList.add('completed');
+                                step.querySelector('.step-indicator').textContent = '✓';
+                            }
+                            
+                            if (data.error) {
+                                step.classList.remove('running');
+                                step.classList.add('error');
+                                resultEl.innerHTML = `<div class="step-error">${escapeHtml(data.error)}</div>`;
+                            }
+                        } catch (e) {}
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Retry step error:', error);
+        step.classList.remove('running');
+        step.classList.add('error');
+        resultEl.innerHTML = `<div class="step-error">재시도 실패: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+/**
+ * Edit step result (결과 수정 UI 표시 - 재전송이 아닌 저장만!)
+ * Think와 메타데이터(token/시간)는 수정 불가
+ */
+function editStepResult(stepNum) {
+    const step = document.querySelector(`.plan-step[data-step-id="${stepNum}"]`);
+    if (!step) return;
+    
+    const resultEl = step.querySelector('.step-result');
+    if (!resultEl) return;
+    
+    // Check if already in edit mode
+    if (step.querySelector('.step-edit-container')) return;
+    
+    // Get editable text only (exclude Think and metadata)
+    let editableText = stepEdits[stepNum] || '';
+    if (!editableText) {
+        // Clone result element to manipulate
+        const clone = resultEl.cloneNode(true);
+        
+        // Remove Think section (not editable - doesn't affect next steps)
+        const thinkSection = clone.querySelector('.think-section-minimal');
+        if (thinkSection) thinkSection.remove();
+        
+        // Remove metadata (duration, tokens - not editable)
+        const metaSection = clone.querySelector('.result-meta-minimal');
+        if (metaSection) metaSection.remove();
+        
+        // Remove result title/summary (not editable)
+        const labelSection = clone.querySelector('.section-label-minimal');
+        if (labelSection) labelSection.remove();
+        
+        editableText = clone.innerText.trim();
+    }
+    
+    // Create edit container
+    const editContainer = document.createElement('div');
+    editContainer.className = 'step-edit-container';
+    editContainer.innerHTML = `
+        <textarea class="step-edit-textarea" placeholder="결과를 수정하거나 보완하세요...">${escapeHtml(editableText)}</textarea>
+        <div class="step-edit-actions">
+            <button class="step-edit-btn cancel" onclick="cancelStepEdit(${stepNum})">취소</button>
+            <button class="step-edit-btn save" onclick="saveStepEdit(${stepNum})">저장</button>
+        </div>
+    `;
+    
+    // Insert after result
+    resultEl.style.display = 'none';
+    step.appendChild(editContainer);
+    
+    // Focus textarea
+    const textarea = editContainer.querySelector('textarea');
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+}
+
+/**
+ * Save step edit (수정 내용 저장 - 재전송하지 않음!)
+ */
+function saveStepEdit(stepNum) {
+    const step = document.querySelector(`.plan-step[data-step-id="${stepNum}"]`);
+    if (!step) return;
+    
+    const textarea = step.querySelector('.step-edit-textarea');
+    const editContainer = step.querySelector('.step-edit-container');
+    const resultEl = step.querySelector('.step-result');
+    
+    if (textarea && textarea.value.trim()) {
+        // Save to stepEdits (메모리에 저장, 재전송 아님)
+        stepEdits[stepNum] = textarea.value.trim();
+        
+        // Add edited badge to step name if not exists
+        const stepName = step.querySelector('.step-name');
+        if (stepName && !stepName.querySelector('.step-edited-badge')) {
+            const badge = document.createElement('span');
+            badge.className = 'step-edited-badge';
+            badge.textContent = '수정됨';
+            stepName.appendChild(badge);
+        }
+    }
+    
+    // Remove edit container and show result
+    if (editContainer) editContainer.remove();
+    if (resultEl) resultEl.style.display = 'block';
+}
+
+/**
+ * Cancel step edit
+ */
+function cancelStepEdit(stepNum) {
+    const step = document.querySelector(`.plan-step[data-step-id="${stepNum}"]`);
+    if (!step) return;
+    
+    const editContainer = step.querySelector('.step-edit-container');
+    const resultEl = step.querySelector('.step-result');
+    
+    if (editContainer) editContainer.remove();
+    if (resultEl) resultEl.style.display = 'block';
+}
+
+/**
+ * Ask about entire plan (Plan 전체 참고하여 질문)
+ */
+function askAboutPlan(btn) {
+    const planBox = btn.closest('.plan-steps-box');
+    const planGoal = planBox?.querySelector('.plan-goal')?.textContent || '';
+    
+    // Collect all steps with results
+    const allSteps = planBox?.querySelectorAll('.plan-step') || [];
+    const planSteps = [];
+    allSteps.forEach(s => {
+        planSteps.push({
+            num: parseInt(s.dataset.stepId),
+            name: s.querySelector('.step-name')?.textContent || '',
+            tool: s.dataset.tool || '',
+            result: s.querySelector('.step-result')?.innerText || ''
+        });
+    });
+    
+    // Set context for plan-level question
+    currentStepQuestion = { 
+        stepNum: 0,  // 0 = plan level
+        tool: 'plan',
+        stepName: 'Plan 전체',
+        context: '',
+        previousSteps: [],
+        planGoal,
+        planSteps
+    };
+    
+    // Add tag pill
+    const inputTags = document.getElementById('inputTags');
+    inputTags.innerHTML = `
+        <span class="input-tag" data-step="plan">
+            Plan 전체
+            <span class="input-tag-remove" onclick="removeStepTag()">×</span>
+        </span>
+    `;
+    
+    messageInput.value = '';
+    messageInput.placeholder = 'Plan 전체에 대해 질문하세요...';
+    messageInput.focus();
+    messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+/**
+ * Ask about step (메인 입력창에 태그 추가 방식)
+ */
+function askAboutStep(stepNum) {
+    const step = document.querySelector(`.plan-step[data-step-id="${stepNum}"]`);
+    if (!step) return;
+    
+    const tool = step.dataset.tool || '';
+    const stepName = step.querySelector('.step-name')?.textContent || '';
+    const resultEl = step.querySelector('.step-result');
+    const context = resultEl?.innerText || '';
+    
+    // Collect plan info (goal + all steps structure)
+    const planBox = step.closest('.plan-steps-box');
+    const planGoal = planBox?.querySelector('.plan-goal')?.textContent || '';
+    
+    // Collect all steps structure (for plan context)
+    const allStepsInPlan = planBox?.querySelectorAll('.plan-step') || [];
+    const planSteps = [];
+    allStepsInPlan.forEach(s => {
+        const sNum = parseInt(s.dataset.stepId);
+        planSteps.push({
+            num: sNum,
+            name: s.querySelector('.step-name')?.textContent || '',
+            tool: s.dataset.tool || ''
+        });
+    });
+    
+    // Collect previous steps with results (for detailed context)
+    const previousSteps = [];
+    allStepsInPlan.forEach(s => {
+        const sNum = parseInt(s.dataset.stepId);
+        if (sNum < stepNum) {
+            previousSteps.push({
+                num: sNum,
+                name: s.querySelector('.step-name')?.textContent || '',
+                result: s.querySelector('.step-result')?.innerText || ''
+            });
+        }
+    });
+    
+    // Store context for when message is sent
+    currentStepQuestion = { 
+        stepNum, tool, stepName, context, 
+        previousSteps,
+        planGoal,      // Plan 목표
+        planSteps      // 전체 plan 구조 (새 plan 작성 시 참고용)
+    };
+    
+    // Add tag pill (instead of text)
+    const inputTags = document.getElementById('inputTags');
+    inputTags.innerHTML = `
+        <span class="input-tag" data-step="${stepNum}">
+            Step ${stepNum}
+            <span class="input-tag-remove" onclick="removeStepTag()">×</span>
+        </span>
+    `;
+    
+    // Clear input and focus
+    messageInput.value = '';
+    messageInput.placeholder = `Step ${stepNum}에 대해 질문하세요...`;
+    messageInput.focus();
+    
+    // Scroll to input area
+    messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+/**
+ * Remove step tag from input
+ */
+function removeStepTag() {
+    const inputTags = document.getElementById('inputTags');
+    inputTags.innerHTML = '';
+    currentStepQuestion = null;
+    messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+}
+
+/**
+ * Send question about step to LLM
+ */
+async function sendStepQuestion(stepNum) {
+    const step = document.querySelector(`.plan-step[data-step-id="${stepNum}"]`);
+    if (!step) return;
+    
+    const input = step.querySelector('.step-question-input');
+    const question = input?.value.trim();
+    if (!question) return;
+    
+    const tool = step.dataset.tool;
+    const stepName = step.querySelector('.step-name')?.textContent || '';
+    const resultEl = step.querySelector('.step-result');
+    const stepContext = resultEl?.innerText || '';
+    
+    // Disable input
+    input.disabled = true;
+    const sendBtn = step.querySelector('.step-question-send');
+    if (sendBtn) sendBtn.disabled = true;
+    
+    // Remove existing answer
+    const existingAnswer = step.querySelector('.step-question-answer');
+    if (existingAnswer) existingAnswer.remove();
+    
+    // Create answer container
+    const answerDiv = document.createElement('div');
+    answerDiv.className = 'step-question-answer';
+    answerDiv.innerHTML = '<span class="loading-dots">답변 생성 중...</span>';
+    step.appendChild(answerDiv);
+    
+    try {
+        const response = await fetch('/step_question', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conv_id: currentConversationId,
+                step_num: stepNum,
+                tool: tool,
+                step_name: stepName,
+                step_context: stepContext,
+                question: question
+            })
+        });
+        
+        if (response.ok) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let answerText = '';
+            let buffer = '';  // Buffer for incomplete SSE lines
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();  // Keep incomplete line for next chunk
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            if (data.token) {
+                                answerText += data.token;
+                                answerDiv.innerHTML = renderMarkdown(answerText);
+                            }
+                            if (data.done) {
+                                // Clear input
+                                input.value = '';
+                            }
+                        } catch (e) {}
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Step question error:', error);
+        answerDiv.innerHTML = `<span class="error">오류: ${escapeHtml(error.message)}</span>`;
+    } finally {
+        input.disabled = false;
+        if (sendBtn) sendBtn.disabled = false;
+        input.focus();
+    }
+}
+
+/**
+ * Send step question from main input (메인 입력창에서 @StepN: 태그로 질문)
+ */
+async function sendStepQuestionFromMain(question) {
+    if (!currentStepQuestion || !currentConversationId) {
+        // tag 제거하고 return
+        document.getElementById('inputTags').innerHTML = '';
+        messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+        currentStepQuestion = null;
+        return;
+    }
+    
+    const { stepNum, tool, stepName, context, previousSteps, planGoal, planSteps } = currentStepQuestion;
+    
+    // Clear input
+    messageInput.value = '';
+    messageInput.style.height = 'auto';
+    
+    // 바로 tag 제거 (보내는 시점에)
+    document.getElementById('inputTags').innerHTML = '';
+    messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+    
+    // Hide welcome message
+    if (welcomeMessage) welcomeMessage.style.display = 'none';
+    
+    // Show user's question in chat (using createMessageHTML)
+    // Use marker that will be converted to tag pill after rendering
+    const userMsgContent = `{{STEP_TAG:${stepNum}}} ${question}`;
+    
+    // Add to currentMessages for proper indexing
+    currentMessages.push({role: 'user', content: userMsgContent});
+    const userIndex = currentMessages.length - 1;
+    
+    const userHTML = createMessageHTML({role: 'user', content: userMsgContent}, userIndex);
+    messagesWrapper.insertAdjacentHTML('beforeend', userHTML);
+    scrollToBottom();
+    
+    // Create assistant message placeholder (using createMessageHTML)
+    // Add placeholder to currentMessages
+    currentMessages.push({role: 'assistant', content: ''});
+    const assistantIndex = currentMessages.length - 1;
+    
+    const assistantHTML = createMessageHTML({role: 'assistant', content: ''}, assistantIndex);
+    messagesWrapper.insertAdjacentHTML('beforeend', assistantHTML);
+    const assistantMsgEl = messagesWrapper.lastElementChild;
+    const contentDiv = assistantMsgEl.querySelector('.answer-content');
+    
+    // Safety check
+    if (!contentDiv) {
+        console.error('contentDiv not found in assistant message');
+        // tag 제거하고 return
+        document.getElementById('inputTags').innerHTML = '';
+        messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+        currentStepQuestion = null;
+        return;
+    }
+    
+    // Show streaming indicator
+    contentDiv.innerHTML = '<span class="streaming-indicator"><span class="streaming-dot"></span><span class="streaming-dot"></span><span class="streaming-dot"></span></span>';
+    
+    isStreaming = true;
+    setStreamingUI(true);
+    
+    try {
+        const response = await fetch('/step_question', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conv_id: currentConversationId,
+                step_num: stepNum,
+                tool: tool,
+                step_name: stepName,
+                step_context: context,
+                previous_steps: previousSteps,
+                plan_goal: planGoal,
+                plan_steps: planSteps,
+                question: question
+            })
+        });
+        
+        console.log('Step question response:', response.status, response.ok);
+        
+        if (response.ok) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let answerText = '';
+            let buffer = '';  // Buffer for incomplete SSE lines
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();  // Keep incomplete line for next chunk
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            if (data.token) {
+                                answerText += data.token;
+                                contentDiv.innerHTML = renderMarkdown(answerText);
+                                scrollToBottom();
+                            }
+                            if (data.error) {
+                                contentDiv.innerHTML = `<span class="error">오류: ${escapeHtml(data.error)}</span>`;
+                            }
+                        } catch (e) {}
+                    }
+                }
+            }
+            
+            // Final render
+            if (answerText) {
+                contentDiv.innerHTML = renderMarkdown(answerText);
+                // Update currentMessages with final answer
+                currentMessages[assistantIndex] = {role: 'assistant', content: answerText};
+            }
+            
+            // Reload sidebar to show updated conversation
+            loadConversations();
+        } else {
+            contentDiv.innerHTML = '<span class="error">요청 실패</span>';
+        }
+    } catch (error) {
+        console.error('Step question error:', error);
+        contentDiv.innerHTML = `<span class="error">오류: ${escapeHtml(error.message)}</span>`;
+    } finally {
+        isStreaming = false;
+        setStreamingUI(false);
+        currentStepQuestion = null;
+        // 확실하게 tag 제거
+        document.getElementById('inputTags').innerHTML = '';
+        messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+    }
+}
+
+/**
+ * Format tool result for display in a plan step
+ * Minimal text-only design without backgrounds, borders, or icons
+ */
+function formatStepResult(toolResult) {
+    if (!toolResult) return '';
+    
+    let html = '';
+    
+    // Handle string result (legacy)
+    if (typeof toolResult === 'string') {
+        return `<div class="section-text">${escapeHtml(toolResult)}</div>`;
+    }
+    
+    // Thought section - collapsible "Think" (light gray, collapsed by default)
+    if (toolResult.thought) {
+        html += `
+            <div class="think-section-minimal collapsed">
+                <span class="think-toggle" onclick="toggleThinkSection(this)">Think ▶</span>
+                <div class="think-content">${escapeHtml(toolResult.thought)}</div>
+            </div>
+        `;
+    }
+    
+    // Action section - removed from UI (shown only in terminal DEBUG)
+    
+    // Result section (결과) - minimal
+    const result = toolResult.result || toolResult;
+    if (result && (result.title || result.details)) {
+        const detailsHtml = result.details && Array.isArray(result.details) 
+            ? `<ul class="result-details-minimal">${result.details.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>` 
+            : '';
+        
+        // Graph output if available
+        let graphHtml = '';
+        if (result.has_graph) {
+            if (result.graph_type === 'efficiency') {
+                graphHtml = createEfficiencyChart(result);
+            } else if (result.graph_type === 'timeline') {
+                graphHtml = createTimelineChart(result);
+            }
+        }
+        
+        const metaHtml = (result.duration || result.tokens) 
+            ? `<div class="result-meta-minimal">${result.duration || ''}${result.duration && result.tokens ? ' · ' : ''}${result.tokens ? result.tokens + ' tokens' : ''}</div>`
+            : '';
+        
+        html += `
+            <div class="step-section-minimal">
+                <span class="section-label-minimal">${escapeHtml(result.title || '결과')}</span>
+                ${detailsHtml}
+                ${graphHtml}
+                ${metaHtml}
+            </div>
+        `;
+    } else if (!html && result) {
+        // Fallback to JSON if no structured content
+        html = `<pre class="result-json">${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
+    }
+    
+    return html;
+}
+
+/**
+ * Update a plan step with its tool result
+ * Returns true if the result was successfully associated with a plan step
+ */
+function updatePlanStepResult(toolName, toolResult) {
+    const planBox = document.getElementById('current-plan-box');
+    if (!planBox) return false;
+    
+    // First try matching by step number (more reliable)
+    let stepEl = null;
+    if (toolResult.step) {
+        stepEl = planBox.querySelector(`[data-step-id="${toolResult.step}"]`);
+    }
+    // Fallback: find the step with matching tool name - prefer running step first
+    if (!stepEl) {
+        stepEl = planBox.querySelector(`.plan-step.running[data-tool="${toolName}"]`) ||
+                 planBox.querySelector(`.plan-step.pending[data-tool="${toolName}"]`) ||
+                 planBox.querySelector(`[data-tool="${toolName}"]`);
+    }
+    if (!stepEl) return false;
+    
+    // Update step status
+    stepEl.classList.remove('pending', 'running');
+    stepEl.classList.add(toolResult.success ? 'completed' : 'error');
+    
+    // Update indicator
+    const indicator = stepEl.querySelector('.step-indicator');
+    if (indicator) {
+        indicator.textContent = toolResult.success ? '✓' : '!';
+    }
+    
+    // Update tool name display (tool is selected at execution time)
+    const toolEl = stepEl.querySelector('.step-tool');
+    if (toolEl && toolName) {
+        toolEl.textContent = toolName;
+        stepEl.dataset.tool = toolName;
+    }
+    
+    // Show result - pass full toolResult to get thought, action, and result
+    const resultEl = stepEl.querySelector('.step-result');
+    if (resultEl && toolResult) {
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = formatStepResult(toolResult);
+        
+        // Update toggle arrow to indicate content is available (▲ = expanded)
+        const toggle = stepEl.querySelector('.step-toggle');
+        if (toggle) {
+            toggle.style.visibility = 'visible';
+            toggle.textContent = '▲';
+        }
+    }
+    
+    return true;
+}
+
+/**
+ * Update plan box with completed results from plan_complete data
+ * Called when done event includes plan_complete
+ */
+function updatePlanBoxWithResults(planBox, planData) {
+    const results = planData.results || [];
+    
+    results.forEach(r => {
+        const stepEl = planBox.querySelector(`[data-step-id="${r.step}"]`);
+        if (stepEl) {
+            // Update step status
+            stepEl.classList.remove('pending', 'running');
+            stepEl.classList.add(r.success ? 'completed' : 'error');
+            
+            // Update indicator
+            const indicator = stepEl.querySelector('.step-indicator');
+            if (indicator) {
+                indicator.textContent = r.success ? '✓' : '!';
+            }
+            
+            // Update result section with full data (thought, action, result)
+            const resultEl = stepEl.querySelector('.step-result');
+            if (resultEl && (r.thought || r.action || r.result)) {
+                resultEl.style.display = 'block';
+                resultEl.innerHTML = formatStepResult({
+                    success: r.success,
+                    thought: r.thought,
+                    action: r.action,
+                    result: r.result
+                });
+                
+                // Show toggle (▲ = expanded)
+                const toggle = stepEl.querySelector('.step-toggle');
+                if (toggle) {
+                    toggle.style.visibility = 'visible';
+                    toggle.textContent = '▲';
+                }
+            }
+        }
+    });
+}
+
+/**
+ * Create a tool call box (shown when LLM calls a tool)
+ */
+function createToolCallBox(toolCall) {
+    const box = document.createElement('div');
+    box.className = 'tool-call-box';
+    box.dataset.toolName = toolCall.name;
+    box.dataset.status = toolCall.status || 'running';
+    
+    const toolId = `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    box.id = toolId;
+    toolCallBoxes[toolCall.name] = toolId;
+    
+    // Tool icon mapping
+    const toolIcons = {
+        'pubmed_search': '📚',
+        'ncbi_gene': '🧬',
+        'crispr_designer': '✂️',
+        'protocol_builder': '📋',
+        'create_plan': '📝',
+        'execute_step': '▶️'
+    };
+    
+    const icon = toolIcons[toolCall.name] || '🔧';
+    
+    box.innerHTML = `
+        <div class="tool-call-header">
+            <span class="tool-icon">${icon}</span>
+            <span class="tool-name">${escapeHtml(toolCall.name)}</span>
+            <span class="tool-status ${toolCall.status || 'running'}">${toolCall.status === 'running' ? '실행 중...' : '완료'}</span>
+        </div>
+        <div class="tool-call-args">
+            <pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre>
+        </div>
+        <div class="tool-call-result" style="display: none;"></div>
+    `;
+    
+    return box;
+}
+
+/**
+ * Update a tool result box with the result data
+ */
+function updateToolResultBox(toolResult) {
+    const toolName = toolResult.tool || toolResult.name || toolResult.executed_tool;
+    
+    // First, try to update plan step if this tool is part of a plan
+    if (updatePlanStepResult(toolName, toolResult)) {
+        return; // Result shown in plan step
+    }
+    
+    // Fallback: show in separate tool box
+    const boxId = toolCallBoxes[toolName];
+    
+    if (!boxId) return;
+    
+    const box = document.getElementById(boxId);
+    if (!box) return;
+    
+    // Update status
+    box.dataset.status = toolResult.success ? 'completed' : 'error';
+    const statusEl = box.querySelector('.tool-status');
+    if (statusEl) {
+        statusEl.className = `tool-status ${toolResult.success ? 'completed' : 'error'}`;
+        statusEl.textContent = toolResult.success ? '완료' : '오류';
+    }
+    
+    // Show result
+    const resultEl = box.querySelector('.tool-call-result');
+    if (resultEl && toolResult.result) {
+        resultEl.style.display = 'block';
+        
+        const result = toolResult.result;
+        let resultHTML = '';
+        
+        // Add thought if present
+        if (toolResult.thought) {
+            resultHTML += `<div class="tool-thought">💭 ${escapeHtml(toolResult.thought)}</div>`;
+        }
+        
+        // Add action if present
+        if (toolResult.action) {
+            resultHTML += `<div class="tool-action">🔧 ${escapeHtml(toolResult.action)}</div>`;
+        }
+        
+        // Add result content
+        if (result.title) {
+            resultHTML += `<div class="tool-result-title">✅ ${escapeHtml(result.title)}</div>`;
+        }
+        
+        if (result.details && Array.isArray(result.details)) {
+            resultHTML += '<ul class="tool-result-details">';
+            for (const detail of result.details) {
+                resultHTML += `<li>${escapeHtml(detail)}</li>`;
+            }
+            resultHTML += '</ul>';
+        }
+        
+        // Add duration/tokens info if present
+        if (result.duration || result.tokens) {
+            resultHTML += `<div class="tool-meta">`;
+            if (result.duration) resultHTML += `⏱️ ${result.duration} `;
+            if (result.tokens) resultHTML += `📊 ${result.tokens} tokens`;
+            resultHTML += `</div>`;
+        }
+        
+        resultEl.innerHTML = resultHTML;
+    }
+}
+
+/**
+ * Create minimal efficiency bar chart (sgRNA efficiency distribution)
+ */
+function createEfficiencyChart(result) {
+    // Generate bar data based on avg_efficiency or random
+    const avgEff = result.avg_efficiency || 0.72;
+    const bars = [];
+    for (let i = 0; i < 6; i++) {
+        const value = 0.4 + (i * 0.1);
+        // Distribution: more bars near avg efficiency
+        const height = Math.max(20, Math.min(95, 
+            100 - Math.abs(value - avgEff) * 200 + Math.random() * 30
+        ));
+        bars.push({ value: value.toFixed(1), height: Math.round(height) });
+    }
+    
+    const barsHtml = bars.map(b => 
+        `<div class="mini-bar" style="height: ${b.height}%;" title="${b.value}"></div>`
+    ).join('');
+    
+    const labelsHtml = bars.map(b => 
+        `<span class="mini-bar-label">${b.value}</span>`
+    ).join('');
+    
+    return `
+        <div class="mini-graph-container">
+            <div class="mini-graph-title">sgRNA 효율 점수 분포</div>
+            <div class="mini-chart">
+                ${barsHtml}
+            </div>
+            <div class="mini-chart-labels">
+                ${labelsHtml}
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Create minimal timeline chart (experiment schedule)
+ */
+function createTimelineChart(result) {
+    const weeks = result.duration_weeks || 6;
+    const phases = [];
+    
+    // Determine phases based on experiment type
+    if (result.experiment_type === 'crispr_screen' || !result.experiment_type) {
+        const p1 = Math.ceil(weeks / 3);
+        const p2 = Math.ceil(2 * weeks / 3);
+        phases.push({ weeks: p1, label: '클로닝', color: '#8B4513' });
+        phases.push({ weeks: p2 - p1, label: '형질도입', color: '#4A5568' });
+        phases.push({ weeks: weeks - p2, label: '분석', color: '#22C55E' });
+    } else {
+        // Generic phases
+        const half = Math.ceil(weeks / 2);
+        phases.push({ weeks: half, label: '준비', color: '#8B4513' });
+        phases.push({ weeks: weeks - half, label: '실행', color: '#22C55E' });
+    }
+    
+    // Build week boxes
+    let weekBoxes = '';
+    let weekNum = 1;
+    let labelHtml = '';
+    
+    phases.forEach((phase, pi) => {
+        for (let i = 0; i < phase.weeks && weekNum <= weeks; i++) {
+            weekBoxes += `<div class="timeline-week" style="background: ${phase.color};">W${weekNum}</div>`;
+            weekNum++;
+        }
+        labelHtml += `<span class="timeline-phase-label" style="flex: ${phase.weeks};">${phase.label}</span>`;
+    });
+    
+    return `
+        <div class="mini-graph-container">
+            <div class="mini-graph-title">${weeks}주 실험 타임라인</div>
+            <div class="mini-timeline">
+                ${weekBoxes}
+            </div>
+            <div class="mini-timeline-labels">
+                ${labelHtml}
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Create a plan box showing all steps
+ */
+function createPlanBox(plan) {
+    const box = document.createElement('div');
+    box.className = 'plan-box';
+    box.id = 'current-plan-box';
+    
+    let stepsHTML = '';
+    for (const step of plan.steps || []) {
+        const statusClass = step.status || 'pending';
+        const statusIcon = statusClass === 'completed' ? '✓' : statusClass === 'running' ? '···' : step.id;
+        
+        stepsHTML += `
+            <div class="plan-step ${statusClass}" data-step-id="${step.id}">
+                <div class="step-indicator">${statusIcon}</div>
+                <div class="step-content">
+                    <div class="step-name">${escapeHtml(step.name)}</div>
+                    <div class="step-tool">${escapeHtml(step.tool)}</div>
+                </div>
+            </div>
+        `;
+    }
+    
+    box.innerHTML = `
+        <div class="plan-header">
+            <span class="plan-icon">📋</span>
+            <span class="plan-title">실행 계획</span>
+            <span class="plan-progress">${plan.current_step || 0} / ${plan.total_steps || plan.steps?.length || 0}</span>
+        </div>
+        <div class="plan-goal">${escapeHtml(plan.goal || '')}</div>
+        <div class="plan-steps">${stepsHTML}</div>
+    `;
+    
+    return box;
+}
+
+/**
+ * Update plan step status
+ */
+function updatePlanStep(stepId, status) {
+    const planBox = document.getElementById('current-plan-box');
+    if (!planBox) return;
+    
+    const stepEl = planBox.querySelector(`[data-step-id="${stepId}"]`);
+    if (!stepEl) return;
+    
+    stepEl.className = `plan-step ${status}`;
+    const indicator = stepEl.querySelector('.step-indicator');
+    if (indicator) {
+        indicator.textContent = status === 'completed' ? '✓' : status === 'running' ? '···' : stepId;
+    }
+}
+
+// ============================================
+// Detail Panel Functions
+// ============================================
+
+/**
+ * Initialize Detail Panel event listeners
+ */
+function setupDetailPanelListeners() {
+    // Close button
+    if (detailClose) {
+        detailClose.addEventListener('click', closeDetailPanel);
+    }
+    
+    // Toggle button
+    if (detailToggle) {
+        detailToggle.addEventListener('click', toggleDetailPanel);
+    }
+    
+    // Tab switching
+    document.querySelectorAll('.detail-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            switchDetailTab(tab.dataset.tab);
+        });
+    });
+    
+    // Resize handle
+    if (detailResizeHandle) {
+        setupDetailResize();
+    }
+    
+    // Regenerate buttons
+    const regeneratePlan = document.getElementById('regeneratePlan');
+    if (regeneratePlan) {
+        regeneratePlan.addEventListener('click', () => requestAnalyzePlan(true));
+    }
+    
+    const regenerateCode = document.getElementById('regenerateCode');
+    if (regenerateCode) {
+        regenerateCode.addEventListener('click', () => {
+            if (currentCodeStep !== null) {
+                requestCodeGen(currentCodeStep, true);
+            }
+        });
+    }
+    
+    // Copy code button
+    const copyCodeBtn = document.getElementById('copyCodeBtn');
+    if (copyCodeBtn) {
+        copyCodeBtn.addEventListener('click', copyCurrentCode);
+    }
+}
+
+/**
+ * Open Detail Panel with plan data
+ */
+function openDetailPanel(planData) {
+    if (!detailPanel) return;
+    
+    // Initialize data
+    detailPanelData.goal = planData.goal || '';
+    detailPanelData.steps = planData.steps || [];
+    detailPanelData.results = [];
+    detailPanelData.codes = {};
+    detailPanelData.summaryCode = null;
+    detailPanelData.analysis = '';
+    detailPanelData.currentStep = 0;
+    
+    // Show panel
+    detailPanel.style.display = 'flex';
+    detailPanel.style.setProperty('--detail-panel-width', detailPanelWidth + 'px');
+    
+    if (detailResizeHandle) {
+        detailResizeHandle.style.display = 'block';
+    }
+    
+    if (detailToggle) {
+        detailToggle.style.display = 'flex';
+        detailToggle.classList.add('panel-open');
+    }
+    
+    detailPanelOpen = true;
+    
+    // Request initial analysis
+    requestAnalyzePlan();
+    
+    // Switch to Analysis Plan tab
+    switchDetailTab('plan');
+}
+
+/**
+ * Close Detail Panel
+ */
+function closeDetailPanel() {
+    if (!detailPanel) return;
+    
+    detailPanel.style.display = 'none';
+    
+    if (detailResizeHandle) {
+        detailResizeHandle.style.display = 'none';
+    }
+    
+    if (detailToggle) {
+        detailToggle.classList.remove('panel-open');
+        // Keep toggle visible for reopening
+    }
+    
+    detailPanelOpen = false;
+}
+
+/**
+ * Toggle Detail Panel
+ */
+function toggleDetailPanel() {
+    if (detailPanelOpen) {
+        closeDetailPanel();
+    } else {
+        // Reopen panel
+        if (detailPanel) {
+            detailPanel.style.display = 'flex';
+            if (detailResizeHandle) {
+                detailResizeHandle.style.display = 'block';
+            }
+            if (detailToggle) {
+                detailToggle.classList.add('panel-open');
+            }
+            detailPanelOpen = true;
+        }
+    }
+}
+
+/**
+ * Hide Detail Panel completely (when no plan)
+ */
+function hideDetailPanel() {
+    if (detailPanel) {
+        detailPanel.style.display = 'none';
+    }
+    if (detailResizeHandle) {
+        detailResizeHandle.style.display = 'none';
+    }
+    if (detailToggle) {
+        detailToggle.style.display = 'none';
+        detailToggle.classList.remove('panel-open');
+    }
+    detailPanelOpen = false;
+    
+    // Reset detail panel data
+    detailPanelData = {
+        goal: '',
+        steps: [],
+        results: {},
+        codes: {},
+        summaryCode: null,
+        analysis: null,
+        currentStep: 0
+    };
+}
+
+/**
+ * Switch Detail Panel tabs
+ */
+function switchDetailTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.detail-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+    
+    // Update tab content
+    document.querySelectorAll('.detail-tab-content').forEach(content => {
+        content.style.display = 'none';
+        content.classList.remove('active');
+    });
+    
+    const activeContent = document.getElementById('tab' + tabName.charAt(0).toUpperCase() + tabName.slice(1));
+    if (activeContent) {
+        activeContent.style.display = 'flex';
+        activeContent.classList.add('active');
+    }
+}
+
+/**
+ * Setup resize drag functionality
+ */
+function setupDetailResize() {
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+    
+    detailResizeHandle.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        startX = e.clientX;
+        startWidth = detailPanel.offsetWidth;
+        detailResizeHandle.classList.add('resizing');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        
+        const diff = startX - e.clientX;
+        const newWidth = Math.max(250, Math.min(startWidth + diff, window.innerWidth * 0.6));
+        
+        detailPanelWidth = newWidth;
+        detailPanel.style.setProperty('--detail-panel-width', newWidth + 'px');
+        detailPanel.style.width = newWidth + 'px';
+        
+        // Sync toggle button position
+        if (detailToggle && detailPanelOpen) {
+            detailToggle.style.right = (newWidth + 4) + 'px';
+        }
+    });
+    
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            detailResizeHandle.classList.remove('resizing');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+}
+
+/**
+ * Request analyze_plan tool call
+ */
+async function requestAnalyzePlan(force = false) {
+    const planLoading = document.getElementById('planLoading');
+    const planContent = document.getElementById('planContent');
+    const regenerateBtn = document.getElementById('regeneratePlan');
+    
+    if (!force && detailPanelData.analysis) {
+        // Already have analysis
+        return;
+    }
+    
+    // Show loading
+    if (planLoading) planLoading.style.display = 'flex';
+    if (planContent) planContent.innerHTML = '';
+    if (regenerateBtn) regenerateBtn.style.display = 'none';
+    
+    try {
+        // Build steps with results
+        const stepsWithResults = detailPanelData.steps.map((step, i) => ({
+            name: step.name,
+            tool: step.tool,
+            description: step.description || '',
+            status: i < detailPanelData.currentStep ? 'completed' : 
+                   i === detailPanelData.currentStep ? 'running' : 'pending',
+            result: detailPanelData.results[i] || null
+        }));
+        
+        const response = await fetch('/api/tool_call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tool: 'analyze_plan',
+                args: {
+                    goal: detailPanelData.goal,
+                    steps: stepsWithResults,
+                    current_step: detailPanelData.currentStep
+                }
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.result && data.result.analysis) {
+            detailPanelData.analysis = data.result.analysis;
+            renderAnalysisPlan(data.result.analysis);
+        } else {
+            if (planContent) {
+                planContent.innerHTML = '<div class="error">분석 생성 실패</div>';
+            }
+        }
+    } catch (error) {
+        console.error('analyze_plan error:', error);
+        if (planContent) {
+            planContent.innerHTML = `<div class="error">오류: ${escapeHtml(error.message)}</div>`;
+        }
+    } finally {
+        if (planLoading) planLoading.style.display = 'none';
+        if (regenerateBtn) regenerateBtn.style.display = 'inline-flex';
+    }
+}
+
+/**
+ * Render Analysis Plan content (markdown)
+ */
+function renderAnalysisPlan(analysis) {
+    const planContent = document.getElementById('planContent');
+    if (!planContent) return;
+    
+    // Use existing markdown renderer
+    planContent.innerHTML = renderMarkdown(analysis);
+}
+
+/**
+ * Request code_gen tool call for a step
+ */
+async function requestCodeGen(stepIndex, force = false) {
+    const codeLoading = document.getElementById('codeLoading');
+    const codeContent = document.getElementById('codeContent');
+    const codeActions = document.getElementById('codeActions');
+    
+    // Check if already have code for this step
+    if (!force && detailPanelData.codes[stepIndex]) {
+        renderCode(stepIndex);
+        return;
+    }
+    
+    const stepResult = detailPanelData.results[stepIndex];
+    if (!stepResult) {
+        if (codeContent) {
+            codeContent.innerHTML = '<div class="code-empty-state">이 Step의 결과가 아직 없습니다.</div>';
+        }
+        return;
+    }
+    
+    // Show loading
+    if (codeLoading) codeLoading.style.display = 'flex';
+    if (codeActions) codeActions.style.display = 'none';
+    
+    const step = detailPanelData.steps[stepIndex];
+    const toolName = step?.tool || 'unknown';
+    
+    try {
+        const response = await fetch('/api/tool_call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tool: 'code_gen',
+                args: {
+                    task: `${toolName} 결과를 시각화하는 Python 코드를 생성하세요. matplotlib과 seaborn을 사용하고, 데이터 테이블도 pandas로 생성하세요.`,
+                    language: 'python',
+                    context: JSON.stringify(stepResult.result || stepResult, null, 2)
+                }
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.result) {
+            detailPanelData.codes[stepIndex] = data.result;
+            renderCode(stepIndex);
+        } else {
+            if (codeContent) {
+                codeContent.innerHTML = '<div class="error">코드 생성 실패</div>';
+            }
+        }
+    } catch (error) {
+        console.error('code_gen error:', error);
+        if (codeContent) {
+            codeContent.innerHTML = `<div class="error">오류: ${escapeHtml(error.message)}</div>`;
+        }
+    } finally {
+        if (codeLoading) codeLoading.style.display = 'none';
+    }
+}
+
+/**
+ * Request summary code generation after plan completion
+ */
+async function requestSummaryCodeGen() {
+    if (detailPanelData.results.length === 0) return;
+    
+    try {
+        const allResults = detailPanelData.results.map((r, i) => ({
+            step: i + 1,
+            tool: detailPanelData.steps[i]?.tool || 'unknown',
+            result: r.result || r
+        }));
+        
+        const response = await fetch('/api/tool_call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tool: 'code_gen',
+                args: {
+                    task: '모든 연구 단계의 결과를 종합하여 시각화하는 Python 코드를 생성하세요. 전체 결과 요약 그래프, 테이블 등을 포함하세요.',
+                    language: 'python',
+                    context: JSON.stringify(allResults, null, 2)
+                }
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.result) {
+            detailPanelData.summaryCode = data.result;
+            updateCodeStepSelector();
+        }
+    } catch (error) {
+        console.error('Summary code_gen error:', error);
+    }
+}
+
+/**
+ * Update code step selector buttons
+ */
+function updateCodeStepSelector() {
+    const selector = document.getElementById('codeStepSelector');
+    if (!selector) return;
+    
+    let html = '';
+    
+    // Step buttons
+    for (let i = 0; i < detailPanelData.steps.length; i++) {
+        const hasCode = detailPanelData.codes[i];
+        const hasResult = detailPanelData.results[i];
+        const step = detailPanelData.steps[i];
+        const activeClass = currentCodeStep === i ? ' active' : '';
+        const disabledAttr = hasResult ? '' : ' disabled';
+        
+        html += `<button class="code-step-btn${activeClass}" data-step="${i}"${disabledAttr}>
+            Step ${i + 1}: ${escapeHtml(step?.tool || '')}
+        </button>`;
+    }
+    
+    // Summary button
+    if (detailPanelData.summaryCode) {
+        const activeClass = currentCodeStep === 'summary' ? ' active' : '';
+        html += `<button class="code-step-btn${activeClass}" data-step="summary">종합</button>`;
+    }
+    
+    selector.innerHTML = html;
+    
+    // Add click handlers
+    selector.querySelectorAll('.code-step-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const stepVal = btn.dataset.step;
+            currentCodeStep = stepVal === 'summary' ? 'summary' : parseInt(stepVal);
+            updateCodeStepSelector();
+            
+            if (currentCodeStep === 'summary') {
+                renderCode('summary');
+            } else {
+                requestCodeGen(currentCodeStep);
+            }
+        });
+    });
+}
+
+/**
+ * Render code for a step or summary
+ */
+function renderCode(stepIndexOrSummary) {
+    const codeContent = document.getElementById('codeContent');
+    const codeActions = document.getElementById('codeActions');
+    if (!codeContent) return;
+    
+    let codeData;
+    let title;
+    
+    if (stepIndexOrSummary === 'summary') {
+        codeData = detailPanelData.summaryCode;
+        title = '종합 분석 코드';
+    } else {
+        codeData = detailPanelData.codes[stepIndexOrSummary];
+        const step = detailPanelData.steps[stepIndexOrSummary];
+        title = `Step ${stepIndexOrSummary + 1}: ${step?.tool || ''} 시각화`;
+    }
+    
+    if (!codeData || !codeData.code) {
+        codeContent.innerHTML = '<div class="code-empty-state">코드가 없습니다.</div>';
+        if (codeActions) codeActions.style.display = 'none';
+        return;
+    }
+    
+    // Simple syntax highlighting
+    const highlightedCode = highlightPythonSyntax(codeData.code);
+    
+    codeContent.innerHTML = `
+        <div class="code-block">
+            <div class="code-block-header">
+                <span class="code-block-title">${escapeHtml(title)}</span>
+                <span class="code-block-lang">${codeData.language || 'python'}</span>
+            </div>
+            <div class="code-block-body">${highlightedCode}</div>
+        </div>
+    `;
+    
+    if (codeActions) codeActions.style.display = 'flex';
+    currentCodeStep = stepIndexOrSummary;
+}
+
+/**
+ * Simple Python syntax highlighting
+ */
+function highlightPythonSyntax(code) {
+    // Escape HTML first
+    let escaped = escapeHtml(code);
+    
+    // Keywords
+    const keywords = ['import', 'from', 'as', 'def', 'class', 'return', 'if', 'else', 'elif', 
+                      'for', 'while', 'in', 'not', 'and', 'or', 'True', 'False', 'None',
+                      'try', 'except', 'finally', 'with', 'lambda', 'yield', 'pass', 'break', 'continue'];
+    
+    // Comments (# ...)
+    escaped = escaped.replace(/(#.*)$/gm, '<span class="code-comment">$1</span>');
+    
+    // Strings (both single and double quotes)
+    escaped = escaped.replace(/(&quot;.*?&quot;|&#39;.*?&#39;|"[^"]*"|'[^']*')/g, '<span class="code-string">$1</span>');
+    
+    // Numbers
+    escaped = escaped.replace(/\b(\d+\.?\d*)\b/g, '<span class="code-number">$1</span>');
+    
+    // Keywords
+    keywords.forEach(kw => {
+        const regex = new RegExp(`\\b(${kw})\\b`, 'g');
+        escaped = escaped.replace(regex, '<span class="code-keyword">$1</span>');
+    });
+    
+    // Function calls
+    escaped = escaped.replace(/\b([a-zA-Z_]\w*)\s*\(/g, '<span class="code-function">$1</span>(');
+    
+    return escaped;
+}
+
+/**
+ * Copy current code to clipboard
+ */
+async function copyCurrentCode() {
+    const copyBtn = document.getElementById('copyCodeBtn');
+    
+    let codeData;
+    if (currentCodeStep === 'summary') {
+        codeData = detailPanelData.summaryCode;
+    } else if (currentCodeStep !== null) {
+        codeData = detailPanelData.codes[currentCodeStep];
+    }
+    
+    if (!codeData || !codeData.code) return;
+    
+    try {
+        await navigator.clipboard.writeText(codeData.code);
+        
+        if (copyBtn) {
+            copyBtn.classList.add('copied');
+            copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+            </svg> Copied!`;
+            
+            setTimeout(() => {
+                copyBtn.classList.remove('copied');
+                copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg> Copy`;
+            }, 2000);
+        }
+    } catch (err) {
+        console.error('Copy failed:', err);
+    }
+}
+
+/**
+ * Render Outputs tab content
+ */
+function renderOutputs() {
+    const outputsContent = document.getElementById('outputsContent');
+    if (!outputsContent) return;
+    
+    if (detailPanelData.results.length === 0) {
+        outputsContent.innerHTML = '<div class="outputs-empty-state">Step 결과가 여기에 표시됩니다.</div>';
+        return;
+    }
+    
+    let html = '';
+    
+    for (let i = 0; i < detailPanelData.results.length; i++) {
+        const result = detailPanelData.results[i];
+        const step = detailPanelData.steps[i];
+        const toolResult = result.result || result;
+        
+        html += `
+            <div class="output-step-section" id="step-output-${i}">
+                <div class="output-step-header">
+                    <span class="output-step-number">${i + 1}</span>
+                    <span class="output-step-title">${escapeHtml(step?.name || 'Step')}</span>
+                    <span class="output-step-tool">${escapeHtml(step?.tool || '')}</span>
+                </div>
+                <div class="output-content">
+                    ${renderToolResultDetail(toolResult)}
+                </div>
+            </div>
+        `;
+    }
+    
+    outputsContent.innerHTML = html;
+}
+
+/**
+ * Render detailed tool result for Outputs tab
+ */
+function renderToolResultDetail(result) {
+    if (!result) return '<div class="error">결과 없음</div>';
+    
+    let html = '';
+    
+    // Title
+    if (result.title) {
+        html += `<div class="output-title">${escapeHtml(result.title)}</div>`;
+    }
+    
+    // Details list
+    if (result.details && Array.isArray(result.details)) {
+        html += '<ul class="output-details">';
+        result.details.forEach(detail => {
+            html += `<li>${escapeHtml(String(detail))}</li>`;
+        });
+        html += '</ul>';
+    }
+    
+    // Table data (gene_table, paper_list, efficiency_data)
+    if (result.gene_table && Array.isArray(result.gene_table)) {
+        html += renderOutputTable(['Gene', 'Function', 'Location'], result.gene_table, ['gene', 'function', 'location']);
+    }
+    
+    if (result.paper_list && Array.isArray(result.paper_list)) {
+        html += renderOutputTable(['Title', 'Authors', 'Year'], result.paper_list.slice(0, 10), ['title', 'authors', 'year']);
+    }
+    
+    if (result.efficiency_data && Array.isArray(result.efficiency_data)) {
+        html += renderOutputTable(['Gene', 'Score'], result.efficiency_data.slice(0, 10), ['gene', 'score']);
+    }
+    
+    // Summary
+    if (result.summary) {
+        html += `<div class="output-summary">${escapeHtml(result.summary)}</div>`;
+    }
+    
+    // Meta info (duration, tokens)
+    const meta = [];
+    if (result.duration) meta.push(`${result.duration}초`);
+    if (result.tokens) meta.push(`${result.tokens} tokens`);
+    
+    if (meta.length > 0) {
+        html += `<div class="output-meta">${meta.join(' | ')}</div>`;
+    }
+    
+    // Fallback to JSON if nothing else
+    if (!html) {
+        html = `<pre class="result-json">${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
+    }
+    
+    return html;
+}
+
+/**
+ * Render table for output data
+ */
+function renderOutputTable(headers, data, keys) {
+    if (!data || data.length === 0) return '';
+    
+    let html = '<table class="output-table"><thead><tr>';
+    headers.forEach(h => {
+        html += `<th>${escapeHtml(h)}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+    
+    data.forEach(row => {
+        html += '<tr>';
+        keys.forEach(key => {
+            html += `<td>${escapeHtml(String(row[key] || ''))}</td>`;
+        });
+        html += '</tr>';
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Add tool result to Detail Panel and trigger updates
+ */
+function addToolResultToDetailPanel(stepIndex, result) {
+    // Store result
+    detailPanelData.results[stepIndex] = result;
+    detailPanelData.currentStep = stepIndex + 1;
+    
+    // Update Outputs tab
+    renderOutputs();
+    
+    // Update code step selector
+    updateCodeStepSelector();
+    
+    // Trigger code generation for this step
+    requestCodeGen(stepIndex);
+    
+    // Refresh analysis
+    requestAnalyzePlan(true);
+}
+
+/**
+ * Handle plan completion
+ */
+function onPlanComplete() {
+    // Generate summary code
+    requestSummaryCodeGen();
+    
+    // Final analysis update
+    requestAnalyzePlan(true);
+}
+
+/**
+ * Scroll to step in Outputs tab
+ */
+function scrollToStepOutput(stepIndex) {
+    // Switch to Outputs tab
+    switchDetailTab('outputs');
+    
+    // Scroll to the step section
+    setTimeout(() => {
+        const stepEl = document.getElementById(`step-output-${stepIndex}`);
+        if (stepEl) {
+            stepEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, 100);
+}
+
+// Initialize Detail Panel listeners after DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    setupDetailPanelListeners();
 });

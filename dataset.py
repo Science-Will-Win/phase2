@@ -27,10 +27,18 @@ class JsonDataset(Dataset):
         self.max_length = max_length
         self.data = []
         
-        # Load system prompt from FileConfig path if exists
+        # Load system prompt: prompts folder (priority) > FileConfig path
         file_config = get_file_config(model_type)
-        if file_config and hasattr(file_config, 'SYSTEM_PROMPT'):
-            system_prompt_path = os.path.join(file_config.BASE_PATH, file_config.SYSTEM_PROMPT)
+        system_prompt_file = file_config.SYSTEM_PROMPT if file_config and hasattr(file_config, 'SYSTEM_PROMPT') else "SYSTEM_PROMPT.txt"
+        
+        # 1. Try prompts folder first
+        prompts_path = os.path.join(os.path.dirname(__file__), "prompts", system_prompt_file)
+        if os.path.exists(prompts_path):
+            with open(prompts_path, "r", encoding="utf-8") as f:
+                self.DEFAULT_SYSTEM_PROMPT = f.read().strip()
+        # 2. Fallback to FileConfig path
+        elif file_config and hasattr(file_config, 'BASE_PATH'):
+            system_prompt_path = os.path.join(file_config.BASE_PATH, system_prompt_file)
             if os.path.exists(system_prompt_path):
                 with open(system_prompt_path, "r", encoding="utf-8") as f:
                     self.DEFAULT_SYSTEM_PROMPT = f.read().strip()

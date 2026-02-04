@@ -326,6 +326,13 @@ def load_model_weights(model, weight_path, load_until=None):
                 print(f"[DEBUG]   ... and {len(missing_list) - 10} more.")
                 break
         print("="*30 + "\n")
+    
+    # Release temporary memory from FP8 dequantization and loading process
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        print(f"[DEBUG] VRAM after loading: Allocated={allocated:.2f}GB, Reserved={reserved:.2f}GB")
             
     return model
 

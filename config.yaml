@@ -1,0 +1,18 @@
+# 환경별 경로 설정
+paths:
+  local:
+    model: "model"
+    data: "data"
+    result: "result"
+    log: "inference_ui/logs"
+    temp_data: "preference_ui/temp_data"
+  
+  server:
+    model: "/raid/shared/model"
+    data: "/raid/shared/data"
+    result: "/raid/shared/result"
+    log: "/raid/shared/log"
+    temp_data: "/raid/shared/temp_data"
+
+# 기본 환경 (--local 없으면 server 사용)
+default_environment: "server"

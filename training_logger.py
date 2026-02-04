@@ -1,9 +1,9 @@
 """
-Training CSV Logger - 학습 결과를 CSV로 기록하는 모듈
+Training CSV Logger - Module for logging training results to CSV
 
-LossResult: Loss 함수 반환 규격
-TrainingLogger: CSV 기록 관리
-CSVLoggingCallback: Trainer와 통합
+LossResult: Loss function return format
+TrainingLogger: CSV logging management
+CSVLoggingCallback: Integration with Trainer
 """
 import os
 import pandas as pd
@@ -12,18 +12,19 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 import torch
 from transformers import TrainerCallback
+from utils.paths import get_result_dir
 
 
 @dataclass
 class LossResult:
     """
-    Loss 함수 반환 규격.
-    모든 loss 함수는 이 형식을 반환해야 함.
+    Loss function return format.
+    All loss functions should return this format.
     
     Attributes:
-        total_loss: 역전파에 사용되는 최종 loss (torch.Tensor)
-        components: 개별 loss 값들 {이름: 값} - CSV 컬럼명으로 사용
-        outputs: 모델 출력 (logits 등), 선택적
+        total_loss: Final loss used for backpropagation (torch.Tensor)
+        components: Individual loss values {name: value} - used as CSV column names
+        outputs: Model outputs (logits, etc.), optional
     """
     total_loss: torch.Tensor
     components: Dict[str, float] = field(default_factory=dict)
@@ -31,16 +32,16 @@ class LossResult:
     
     @property
     def component_names(self) -> List[str]:
-        """CSV 컬럼명으로 사용할 loss component 이름들"""
+        """Loss component names to use as CSV column names"""
         return list(self.components.keys())
 
 
 class TrainingLogger:
     """
-    학습 결과를 CSV로 기록.
+    Logs training results to CSV.
     
-    파일명 형식: {model_type}-{freeze_str}-{param_str}-{epochs}ep-{save_info}-{date_str}-{time_str}.csv
-    저장 위치: result/
+    Filename format: {model_type}-{freeze_str}-{param_str}-{epochs}ep-{save_info}-{date_str}-{time_str}.csv
+    Save location: result/
     """
     
     def __init__(
@@ -50,25 +51,29 @@ class TrainingLogger:
         param_str: str,
         epochs: int,
         save_info: str,
-        output_dir: str = "result"
+        output_dir: str = None
     ):
         """
         Args:
-            model_type: 모델 타입 (e.g., "ministral_3_3b_instruct")
-            freeze_str: freeze 설정 (e.g., "full", "layer_10")
-            param_str: 파라미터 수 (e.g., "3.2B")
-            epochs: 총 학습 epoch 수
-            save_info: 저장 전략 정보 (e.g., "epoch", "500step")
-            output_dir: CSV 저장 폴더 (default: "result")
+            model_type: Model type (e.g., "ministral_3_3b_instruct")
+            freeze_str: Freeze setting (e.g., "full", "layer_10")
+            param_str: Parameter count (e.g., "3.2B")
+            epochs: Total training epochs
+            save_info: Save strategy info (e.g., "epoch", "500step")
+            output_dir: CSV save folder (default: from config.yaml)
         """
-        # 파일명 생성
+        # Use configured result directory if not specified
+        if output_dir is None:
+            output_dir = get_result_dir()
+        
+        # Generate filename
         now = datetime.now()
         date_str = now.strftime("%Y%m%d")
         time_str = now.strftime("%H%M%S")
         
         filename = f"{model_type}-{freeze_str}-{param_str}-{epochs}ep-{save_info}-{date_str}-{time_str}.csv"
         
-        # result 폴더 생성
+        # Create result folder
         os.makedirs(output_dir, exist_ok=True)
         self.output_path = os.path.join(output_dir, filename)
         
@@ -79,14 +84,14 @@ class TrainingLogger:
     @classmethod
     def from_args(cls, args, total_params: int) -> "TrainingLogger":
         """
-        argparse args에서 직접 생성.
+        Create directly from argparse args.
         
         Args:
-            args: argparse로 파싱된 arguments
-            total_params: 모델 총 파라미터 수
+            args: Arguments parsed by argparse
+            total_params: Total model parameters
             
         Returns:
-            TrainingLogger 인스턴스
+            TrainingLogger instance
         """
         freeze_str = args.freeze_until_layer if args.freeze_until_layer else "full"
         param_str = f"{total_params/1e9:.1f}B"
@@ -114,15 +119,15 @@ class TrainingLogger:
         **extra
     ):
         """
-        한 스텝의 결과 기록.
+        Log results for one step.
         
         Args:
             step: Global step number
             epoch: Current epoch (float, e.g., 0.5, 1.0)
-            loss_result: LossResult 객체 (loss components 포함)
-            predict: 모델 예측 텍스트 (선택)
-            label: 정답 텍스트 (선택)
-            **extra: 추가 기록할 필드들
+            loss_result: LossResult object (contains loss components)
+            predict: Model prediction text (optional)
+            label: Ground truth text (optional)
+            **extra: Additional fields to log
         """
         record = {
             "step": step,
@@ -131,7 +136,7 @@ class TrainingLogger:
             "label": label,
         }
         
-        # Loss components 추가 (동적 컬럼)
+        # Add loss components (dynamic columns)
         if loss_result is not None:
             total_loss_val = loss_result.total_loss.item() \
                 if isinstance(loss_result.total_loss, torch.Tensor) \
@@ -143,7 +148,7 @@ class TrainingLogger:
         self.records.append(record)
     
     def save(self):
-        """CSV 파일로 저장 (덮어쓰기)"""
+        """Save to CSV file (overwrite)"""
         if not self.records:
             print("[TrainingLogger] No records to save.")
             return
@@ -155,25 +160,25 @@ class TrainingLogger:
 
 class CSVLoggingCallback(TrainerCallback):
     """
-    Trainer Callback으로 CSV 저장을 model checkpoint와 동기화.
+    Trainer Callback to synchronize CSV saving with model checkpoint.
     
-    - on_save: checkpoint 저장 시 CSV도 저장
-    - on_train_end: 학습 종료 시 최종 저장
+    - on_save: Save CSV when checkpoint is saved
+    - on_train_end: Final save when training ends
     """
     
     def __init__(self, logger: TrainingLogger):
         """
         Args:
-            logger: TrainingLogger 인스턴스
+            logger: TrainingLogger instance
         """
         self.logger = logger
     
     def on_save(self, args, state, control, **kwargs):
-        """모델 체크포인트 저장할 때 CSV도 저장"""
+        """Save CSV when model checkpoint is saved"""
         self.logger.save()
         return control
     
     def on_train_end(self, args, state, control, **kwargs):
-        """학습 종료 시 최종 저장"""
+        """Final save when training ends"""
         self.logger.save()
         return control

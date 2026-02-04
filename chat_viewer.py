@@ -1,34 +1,38 @@
 """
-Chat Log Viewer - JSON 채팅 로그를 브라우저에서 예쁘게 보여주는 스크립트
+Chat Log Viewer - Script to display JSON chat logs nicely in browser
 
-사용법:
+Usage:
     python chat_viewer.py
+    python chat_viewer.py --local
     uv run chat_viewer.py
 """
 
+import argparse
 import json
 import os
 import webbrowser
 import tempfile
 import sys
 from pick import pick
+from utils.paths import set_local_mode, get_log_dir
 
-DEFAULT_LOG_DIR = "inference_log"
+# Will be set dynamically based on --local flag
+DEFAULT_LOG_DIR = None
 
 
 def get_log_files(log_dir):
-    """JSON 파일 목록을 최신순으로 반환"""
+    """Return JSON file list sorted by newest first"""
     if not os.path.exists(log_dir):
         return []
     
     files = [f for f in os.listdir(log_dir) if f.endswith('.json')]
-    # 파일명 기준 최신순 정렬 (타임스탬프가 파일명에 포함되어 있음)
+    # Sort by filename newest first (timestamp is included in filename)
     files.sort(reverse=True)
     return files
 
 
 def generate_html(data):
-    """JSON 데이터를 HTML로 변환"""
+    """Convert JSON data to HTML"""
     model = data.get('model', 'Unknown')
     timestamp = data.get('timestamp', '')
     
@@ -150,47 +154,60 @@ def generate_html(data):
 
 
 def view_chat(json_path):
-    """JSON을 HTML로 변환 후 브라우저에서 열기 (임시 파일 사용)"""
+    """Convert JSON to HTML and open in browser (using temp file)"""
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
     html = generate_html(data)
     
-    # 임시 HTML 파일 생성 후 브라우저에서 열기
+    # Create temp HTML file and open in browser
     with tempfile.NamedTemporaryFile(mode='w', suffix='.html', 
                                       encoding='utf-8', delete=False) as f:
         f.write(html)
         temp_path = f.name
     
-    print(f"\n🚀 브라우저에서 열기: {os.path.basename(json_path)}")
+    print(f"\nOpening in browser: {os.path.basename(json_path)}")
     webbrowser.open(f'file://{temp_path}')
 
 
 def main():
-    # 스크립트 위치 기준 상대 경로 처리
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    log_dir = os.path.join(script_dir, DEFAULT_LOG_DIR)
+    global DEFAULT_LOG_DIR
     
-    # JSON 파일 목록 가져오기
+    parser = argparse.ArgumentParser(description="Chat Log Viewer")
+    parser.add_argument("--local", action="store_true",
+                        help="Use local paths instead of server paths (default: server)")
+    args = parser.parse_args()
+    
+    # Set environment based on --local flag
+    set_local_mode(args.local)
+    DEFAULT_LOG_DIR = get_log_dir()
+    
+    # Use configured log directory
+    log_dir = DEFAULT_LOG_DIR
+    if not os.path.isabs(log_dir):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(script_dir, log_dir)
+    
+    # Get JSON file list
     files = get_log_files(log_dir)
     
     if not files:
-        print(f"❌ {DEFAULT_LOG_DIR} 폴더에 JSON 파일이 없습니다.")
+        print(f"No JSON files in {DEFAULT_LOG_DIR} folder.")
         sys.exit(1)
     
     while True:
-        # pick으로 화살표 키 선택 UI 제공
-        # quit_keys: 'q' 또는 'Q' 누르면 (None, None) 반환
-        title = f"Chat Logs ({DEFAULT_LOG_DIR})\n[↑/↓: 이동] [Enter: 선택] [q: 종료]"
+        # Provide arrow key selection UI with pick
+        # quit_keys: pressing 'q' or 'Q' returns (None, None)
+        title = f"Chat Logs ({DEFAULT_LOG_DIR})\n[Up/Down: Navigate] [Enter: Select] [q: Quit]"
         selected, index = pick(files, title, indicator=">",
                                quit_keys=[ord('q'), ord('Q')])
         
-        # 'q' 키로 종료 (quit_keys는 None 반환)
+        # Exit with 'q' key (quit_keys returns None)
         if selected is None:
-            print("\n👋 종료합니다.")
+            print("\nExiting.")
             break
         
-        # 선택한 파일 열기
+        # Open selected file
         json_path = os.path.join(log_dir, selected)
         view_chat(json_path)
 

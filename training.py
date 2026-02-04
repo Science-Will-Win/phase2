@@ -1,7 +1,29 @@
 import argparse
 import os
 import sys
+
+# ============================================================================
+# Early GPU Configuration (MUST be before torch import)
+# ============================================================================
+_gpu_parser = argparse.ArgumentParser(add_help=False)
+_gpu_parser.add_argument("--local", action="store_true")
+_gpu_parser.add_argument("--gpu", type=str, default=None)
+_gpu_args, _ = _gpu_parser.parse_known_args()
+
+# Determine GPU default based on --local flag
+if _gpu_args.gpu is not None:
+    _gpu_ids = _gpu_args.gpu
+elif _gpu_args.local:
+    _gpu_ids = "0"  # Local mode: single GPU
+else:
+    _gpu_ids = "6,7"  # Server mode: multi GPU
+
+os.environ["CUDA_VISIBLE_DEVICES"] = _gpu_ids
+print(f"[GPU] Using CUDA_VISIBLE_DEVICES={_gpu_ids}")
+# ============================================================================
+
 import torch
+import gc
 from transformers import Trainer, TrainingArguments, default_data_collator
 import model as model_module
 from tokenizer import TokenizerManager
@@ -9,7 +31,7 @@ import loss as loss_module
 import dataset as dataset_module
 from training_logger import TrainingLogger, CSVLoggingCallback
 from utils import get_file_config
-import gc
+from utils.paths import set_local_mode, get_model_dir
 
 def unload_model(obj_list, debug=False):
     """
@@ -136,6 +158,9 @@ def set_seed(seed, debug=False):
         print(f"[DEBUG] Random seed set to {seed}")
 
 def run_training(args):
+    # Set environment based on --local flag (for path management)
+    set_local_mode(args.local)
+    
     # Set random seed for reproducibility
     import random as py_random
     if args.random_seed < 0:
@@ -151,7 +176,8 @@ def run_training(args):
     # Check and print CUDA info
     if torch.cuda.is_available():
         print(f"CUDA is available. Device count: {torch.cuda.device_count()}")
-        print(f"Current device: {torch.cuda.get_device_name(0)}")
+        for i in range(torch.cuda.device_count()):
+            print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
     else:
         print("CUDA is NOT available. Using CPU.")
 
@@ -319,11 +345,19 @@ def run_training(args):
                 "format": args.gdpo_reward_weight_format,
                 "length": args.gdpo_reward_weight_length,
                 "accuracy": args.gdpo_reward_weight_accuracy,
+                "uncertainty": args.gdpo_reward_weight_uncertainty,
+                "temperature": args.gdpo_reward_weight_temperature,
             },
             "use_conditioned_rewards": args.gdpo_use_conditioned_rewards,
             "condition_threshold": args.gdpo_condition_threshold,
             "target_length": args.gdpo_target_length,
-            # Heteroscedastic weight for heteroscedastic_gdpo
+            # Temperature Contrastive
+            "use_temperature_contrastive": args.gdpo_use_temperature_contrastive,
+            "low_temperature": args.gdpo_low_temperature,
+            "high_temperature": args.gdpo_high_temperature,
+            # Uncertainty Reward
+            "uncertainty_threshold": args.gdpo_uncertainty_threshold,
+            # Heteroscedastic weight (legacy, for heteroscedastic_gdpo before refactor)
             "heteroscedastic_weight": args.heteroscedastic_weight,
         }
         
@@ -407,6 +441,22 @@ if __name__ == "__main__":
     parser.add_argument("--gdpo_target_length", type=int, default=1024,
                         help="Target length for length penalty calculation")
     
+    # GDPO Temperature Contrastive Arguments (NEW)
+    parser.add_argument("--gdpo_use_temperature_contrastive", action="store_true",
+                        help="Enable temperature contrastive sampling (low temp=chosen, high temp=rejected)")
+    parser.add_argument("--gdpo_low_temperature", type=float, default=0.3,
+                        help="Low temperature for chosen samples (default: 0.3)")
+    parser.add_argument("--gdpo_high_temperature", type=float, default=1.2,
+                        help="High temperature for rejected samples (default: 1.2)")
+    parser.add_argument("--gdpo_reward_weight_temperature", type=float, default=1.0,
+                        help="Weight for temperature contrastive reward")
+    
+    # GDPO Uncertainty Reward Arguments (NEW)
+    parser.add_argument("--gdpo_uncertainty_threshold", type=float, default=0.6,
+                        help="Uncertainty threshold for penalty (default: 0.6)")
+    parser.add_argument("--gdpo_reward_weight_uncertainty", type=float, default=1.0,
+                        help="Weight for uncertainty reward (heteroscedastic_gdpo)")
+    
     # Heteroscedastic Loss Arguments
     parser.add_argument("--heteroscedastic_T", type=int, default=3,
                         help="Number of Monte Carlo samples for heteroscedastic loss (default: 3, memory-efficient)")
@@ -420,6 +470,12 @@ if __name__ == "__main__":
     # Debug
     parser.add_argument("--debug", action="store_true",
                         help="Enable debug output for detailed logging")
+
+    # Environment selection
+    parser.add_argument("--local", action="store_true",
+                        help="Use local paths instead of server paths (default: server). Also sets GPU default to 0.")
+    parser.add_argument("--gpu", type=str, default=None,
+                        help="GPU IDs to use (e.g., '0' or '6,7'). Default: '6,7' (server) or '0' (local)")
 
     # Add Model Hyperparameters
     model_module.add_model_args(parser)

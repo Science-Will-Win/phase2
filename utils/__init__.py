@@ -1,3 +1,4 @@
-# Utils package
-from utils.config_utils import get_file_config
-from utils.detailed_help import check_detailed_help, DETAILED_HELP
+"""Utility modules."""
+from .config_utils import get_file_config
+
+__all__ = ["get_file_config"]

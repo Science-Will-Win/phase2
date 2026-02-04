@@ -54,40 +54,40 @@ def convert_from_kv_cache_dtype(tensor: torch.Tensor, original_dtype: torch.dtyp
 # ============================================================================
 
 class Ministral3TokenConfig:
-    """Reasoning 토큰 설정"""
+    """Reasoning token configuration"""
     
-    # 필수 토큰
+    # Required tokens
     THINK_START: str = "[THINK]"
     THINK_END: str = "[/THINK]"
     
-    # 선택 토큰 (None이면 사용 안 함)
+    # Optional tokens (None if not used)
     ANSWER_START: str | None = "<SPECIAL_36>"
     ANSWER_END: str | None = "<SPECIAL_37>"
 
 
 class Ministral3FileConfig:
-    """모델 관련 파일 경로/역할 지정"""
+    """Model-related file paths/roles configuration"""
     
-    # 기본 경로
+    # Base path
     BASE_PATH: str = "model/ministral_3_3b_instruct"
     
-    # 다운로드용
+    # For download
     HF_REPO_ID: str = "mistralai/Ministral-3-3B-Instruct-2512"
     
-    # === 모델 설정 ===
+    # === Model config ===
     PARAMS: str = "params.json"
     GENERATION_CONFIG: str = "generation_config.json"
     
-    # === 토크나이저 관련 ===
+    # === Tokenizer related ===
     TOKENIZER: str = "tokenizer.json"
     TOKENIZER_CONFIG: str = "tokenizer_config.json"
     SPECIAL_TOKENS_MAP: str = "special_tokens_map.json"
     TEKKEN: str = "tekken.json"
     
-    # === 프로세서 ===
+    # === Processor ===
     PROCESSOR_CONFIG: str = "processor_config.json"
     
-    # === 채팅/프롬프트 ===
+    # === Chat/Prompt ===
     CHAT_TEMPLATE: str = "chat_template.jinja"
     SYSTEM_PROMPT: str = "SYSTEM_PROMPT.txt"
 

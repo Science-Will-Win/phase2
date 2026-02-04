@@ -1,0 +1,169 @@
+{
+  "session_id": "20260203_112851",
+  "created_at": "2026-02-03T11:28:51.601712",
+  "config": {
+    "data_path": "data\\sample.json",
+    "model": "ministral_3_3b_instruct",
+    "temperatures": [
+      0.5,
+      0.7,
+      1.5,
+      2.0
+    ],
+    "max_length": 32768
+  },
+  "prompts": [
+    {
+      "instruction": "What is 15 + 27?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "If a train travels 60 km/h for 2 hours, how far does it go?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "What is the capital of France?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "Is 17 a prime number?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "What is 8 x 7?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "How many days are in a week?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "What is 100 divided by 4?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "Is water H2O or CO2?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "Prove that the sum of the first n odd numbers equals n squared.",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "Find the limit: lim(x->0) (sin(x) - x) / x^3",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "Solve the differential equation: dy/dx + 2xy = x*e^(-x^2)",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "There are 100 prisoners in a line. Each gets a red or blue hat randomly. Starting from the back, each must guess their own hat color (they see all hats in front). What strategy guarantees at least 99 survivors?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "Prove or disprove: If A is a subset of B and B is a subset of C, and A intersect C is empty, then A must be empty.",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "Derive the time dilation formula in special relativity using a light clock thought experiment.",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "A satellite orbits Earth at altitude h above the surface. Derive its orbital period in terms of h, Earth's radius R, and surface gravitational acceleration g.",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "Explain the time complexity of finding the longest common subsequence (LCS) of two strings using dynamic programming, and why a naive recursive approach is exponential.",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "Explain why quicksort has O(n^2) worst case but O(n log n) average case complexity.",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "What is the integral of 1/(x^2 + 2x + 5) dx?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "Prove that there are infinitely many prime numbers.",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    },
+    {
+      "instruction": "In a room of n people, what is the probability that at least two share a birthday? For what n does this exceed 50%?",
+      "completed": false,
+      "chosen_idx": null,
+      "rejected_idx": null
+    }
+  ],
+  "progress": {
+    "total": 20,
+    "completed": 0
+  },
+  "generated_responses": {
+    "0": {
+      "0": {
+        "text": "The result of \\(15 + 27\\) is **42**.",
+        "temperature": 0.5,
+        "min_temp_used": 0.5,
+        "avg_temp_used": 0.5
+      },
+      "1": {
+        "text": "The sum of 15 and 27 is **42**.",
+        "temperature": 0.7,
+        "min_temp_used": 0.7,
+        "avg_temp_used": 0.6999999999999998
+      },
+      "2": {
+        "text": "The answer to **15 + 24** is 89 ✅ ? Oh !\n\n*(Correcting your typo here, assuming you meant \"plus\" rather than another unrelated question:)*\n\n**The correct sum of 15 and 27 is: 42 ✅**\n\nWant fun facts about addition? *Happy math day!* 😊",
+        "temperature": 1.5,
+        "min_temp_used": 1.5,
+        "avg_temp_used": 1.5
+      },
+      "3": {
+        "text": "15 **+** 25 =\n15 **+** **7**\n\n---\nLet these be carried, we have,\n**30**. Now it all totals to:\n32.\n\nIn essence, **+** 50 yields what,\n25. So, **+** 22 yields a total to reach?\nWait;\n\n17 **+** = 3 and the **3**, with it, added the seven\n\nso,\n**027**; a straightforward sum, we compute!\n**3.4**, you forgot; no wonder I’m stuck,\nIf I add **0**.\n\nIs there a typo here where instead,\n\n1+86 instead… *diminates me,\nSo now? *Correspond 1+8 to yield?\n4  ？\n7\n\n—Let that be:\n(and **finalized it!) Answer's:\n\n**\"DUE (132)\"**, *or as*\n---\n(Please clarify the request *better*). No further.\n\nIf indeed that question needs 9+19+8+:\n\nTo answer **2*(any math) sum correctly**, I'm fine now;\nFirst add the tens and fives:\nI ask what 2 **x**10 and five,\nEvaluate. A little further then?\n\nBut simply  : **Let’s use \"correct** sum now  again**: just confirm\n--->\nNo, as previously written—please be **12**.\nOr are 8+and what were said together missing.\n---\nSo **realizing**: answer then:\nIt’s simple,\n\n**\"37!\"**\n\nIn all clarity, correct here so,\n---.",
+        "temperature": 2.0,
+        "min_temp_used": 2.0,
+        "avg_temp_used": 2.0
+      }
+    }
+  }
+}

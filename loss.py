@@ -111,6 +111,19 @@ def get_loss_handler(loss_type):
     Returns a loss computation function based on loss_type.
     The returned function should have signature:
     func(model, inputs, trainer) -> LossResult
+    
+    Available loss types:
+    - "cross_entropy": Standard causal LM loss
+    - "gdpo": Group reward-Decoupled Normalization Policy Optimization (3 objectives)
+    - "heteroscedastic_gdpo": GDPO with uncertainty reward (4 objectives)
+    - "heteroscedastic_cross_entropy": CE loss with heteroscedastic uncertainty
+    - "heteroscedastic_uncertainty": Learned heteroscedastic uncertainty loss
+    
+    Note: "gdpo" and "heteroscedastic_gdpo" now use class-based implementation 
+    with optional temperature contrastive support. Configure via trainer.gdpo_config:
+    - use_temperature_contrastive: bool (default False)
+    - low_temperature: float (default 0.3)
+    - high_temperature: float (default 1.2)
     """
     if loss_type == "cross_entropy":
         return compute_cross_entropy_loss
@@ -123,7 +136,9 @@ def get_loss_handler(loss_type):
     elif loss_type == "heteroscedastic_uncertainty":
         return heteroscedastic_uncertainty_loss
     else:
-        raise ValueError(f"Unsupported loss_type: {loss_type}")
+        raise ValueError(f"Unsupported loss_type: {loss_type}. "
+                        f"Available: cross_entropy, gdpo, heteroscedastic_gdpo, "
+                        f"heteroscedastic_cross_entropy, heteroscedastic_uncertainty")
 
 def compute_cross_entropy_loss(model, inputs, trainer_context) -> LossResult:
     """

@@ -29,7 +29,28 @@ from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 import mimetypes
 
+# ============================================================================
+# Early GPU Configuration (MUST be before torch import)
+# ============================================================================
+_gpu_parser = argparse.ArgumentParser(add_help=False)
+_gpu_parser.add_argument("--local", action="store_true")
+_gpu_parser.add_argument("--gpu", type=str, default=None)
+_gpu_args, _ = _gpu_parser.parse_known_args()
+
+# Determine GPU default based on --local flag
+if _gpu_args.gpu is not None:
+    _gpu_ids = _gpu_args.gpu
+elif _gpu_args.local:
+    _gpu_ids = "0"  # Local mode: single GPU
+else:
+    _gpu_ids = "6,7"  # Server mode: multi GPU
+
+os.environ["CUDA_VISIBLE_DEVICES"] = _gpu_ids
+print(f"[GPU] Using CUDA_VISIBLE_DEVICES={_gpu_ids}")
+# ============================================================================
+
 import torch
+import torch.nn as nn
 # pick removed - using custom keyboard input for reliability
 
 # Browser connection tracking
@@ -45,6 +66,7 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 import model as model_module
 from tokenizer import TokenizerManager
 from utils import get_file_config
+from utils.paths import set_local_mode, get_data_dir, get_temp_data_dir, ensure_dirs
 from inference import (
     calculate_uncertainty,
     sample_token,
@@ -54,8 +76,9 @@ from inference import (
 
 # Constants
 PORT = 8080
-TEMP_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preference_ui", "temp_data")
-FINAL_DATA_DIR = "data"
+# TEMP_DATA_DIR and FINAL_DATA_DIR are set dynamically based on --local flag
+TEMP_DATA_DIR = None  # Will be set in main()
+FINAL_DATA_DIR = None  # Will be set in main()
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preference_ui")
 
 # Global model and tokenizer (kept in memory for streaming)
@@ -64,6 +87,20 @@ global_tokenizer = None
 global_system_prompt = "You are a helpful AI assistant."
 global_args = None
 global_server = None  # HTTP server instance for cleanup
+
+
+def get_model_device(model):
+    """Get device of a model, handling DataParallel wrapper."""
+    if isinstance(model, nn.DataParallel):
+        return next(model.module.parameters()).device
+    return next(model.parameters()).device
+
+
+def get_unwrapped_model(model):
+    """Get the underlying model (unwrap DataParallel if needed)."""
+    if isinstance(model, nn.DataParallel):
+        return model.module
+    return model
 
 
 def cleanup():
@@ -116,17 +153,17 @@ def kill_nodejs_processes():
     import subprocess
     import time
     try:
-        # Windows에서 node.exe 프로세스 종료
+        # Terminate node.exe processes on Windows
         result = subprocess.run(
             ['taskkill', '/F', '/IM', 'node.exe'],
             capture_output=True, text=True
         )
         if result.returncode == 0:
             print("[INFO] Node.js processes terminated to prevent GPU conflicts")
-            time.sleep(3)  # GPU 리소스 해제 대기
-        # returncode != 0이면 node.exe가 없는 것이므로 무시
+            time.sleep(3)  # Wait for GPU resources to be released
+        # If returncode != 0, node.exe doesn't exist, so ignore
     except Exception:
-        pass  # 실패해도 계속 진행
+        pass  # Continue even if failed
 
 
 def signal_handler(signum, frame):
@@ -513,6 +550,7 @@ def generate_streaming(prompt: str, temperature: float, max_length: int = 32768)
     ]
     
     # Tokenize
+    device = get_model_device(global_model)
     try:
         inputs = global_tokenizer.apply_chat_template(
             messages,
@@ -521,15 +559,15 @@ def generate_streaming(prompt: str, temperature: float, max_length: int = 32768)
             return_tensors="pt"
         )
         if isinstance(inputs, torch.Tensor):
-            input_ids = inputs.to(global_model.device)
+            input_ids = inputs.to(device)
             attention_mask = torch.ones_like(input_ids)
         else:
-            input_ids = inputs["input_ids"].to(global_model.device)
-            attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids)).to(global_model.device)
+            input_ids = inputs["input_ids"].to(device)
+            attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids)).to(device)
     except Exception as e:
         text = f"{global_system_prompt}\n\nUser: {prompt}\nAssistant:"
         inputs = global_tokenizer(text, return_tensors="pt")
-        input_ids = inputs["input_ids"].to(global_model.device)
+        input_ids = inputs["input_ids"].to(device)
         attention_mask = torch.ones_like(input_ids)
     
     # Build args object for generate_with_refusal_streaming
@@ -884,7 +922,7 @@ def select_session_interactive(sessions):
     """Display interactive session selection menu."""
     import msvcrt  # Windows keyboard input
     
-    # 옵션 목록 생성
+    # Generate options list
     options = ["[New Session] Start fresh"]
     for sess in sessions:
         options.append(f"{sess['id']} ({sess['completed']}/{sess['total']} completed, {sess['remaining']} remaining)")
@@ -1010,7 +1048,13 @@ def load_model_and_tokenizer(args):
     model_args = ModelArgs(args.model, model_path)
     global_model = model_module.get_model(model_args)
     global_model.eval()
-    print(f"[INFO] Model loaded on {global_model.device}")
+    
+    # Wrap with DataParallel if multiple GPUs available
+    if torch.cuda.device_count() > 1:
+        print(f"[INFO] Using DataParallel with {torch.cuda.device_count()} GPUs")
+        global_model = nn.DataParallel(global_model)
+    
+    print(f"[INFO] Model loaded on {get_model_device(global_model)}")
     
     # Load tokenizer
     print("[INFO] Loading tokenizer...")
@@ -1026,10 +1070,17 @@ def load_model_and_tokenizer(args):
             with open(chat_template_path, "r", encoding="utf-8") as f:
                 global_tokenizer.chat_template = f.read().strip()
         
-        system_prompt_path = os.path.join(file_config.BASE_PATH, file_config.SYSTEM_PROMPT)
-        if os.path.exists(system_prompt_path):
-            with open(system_prompt_path, "r", encoding="utf-8") as f:
+        # Load system prompt: prompts folder (priority) > FileConfig path
+        system_prompt_file = file_config.SYSTEM_PROMPT if hasattr(file_config, 'SYSTEM_PROMPT') else "SYSTEM_PROMPT.txt"
+        prompts_path = os.path.join(os.path.dirname(__file__), "prompts", system_prompt_file)
+        if os.path.exists(prompts_path):
+            with open(prompts_path, "r", encoding="utf-8") as f:
                 global_system_prompt = f.read().strip()
+        else:
+            system_prompt_path = os.path.join(file_config.BASE_PATH, system_prompt_file)
+            if os.path.exists(system_prompt_path):
+                with open(system_prompt_path, "r", encoding="utf-8") as f:
+                    global_system_prompt = f.read().strip()
     
     print("[INFO] Tokenizer loaded")
 
@@ -1201,7 +1252,20 @@ if __name__ == "__main__":
     parser.add_argument("--top_k", type=int, default=50,
                         help="Top-k sampling parameter (default: 50)")
     
+    # Environment selection
+    parser.add_argument("--local", action="store_true",
+                        help="Use local paths instead of server paths (default: server). Also sets GPU default to 0.")
+    parser.add_argument("--gpu", type=str, default=None,
+                        help="GPU IDs to use (e.g., '0' or '6,7'). Default: '6,7' (server) or '0' (local)")
+    
     args = parser.parse_args()
+    
+    # Set environment based on --local flag
+    global TEMP_DATA_DIR, FINAL_DATA_DIR
+    set_local_mode(args.local)
+    TEMP_DATA_DIR = get_temp_data_dir()
+    FINAL_DATA_DIR = get_data_dir()
+    ensure_dirs()
     
     # Kill Node.js processes to prevent GPU conflicts
     kill_nodejs_processes()

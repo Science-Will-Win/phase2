@@ -1,0 +1,7 @@
+﻿model,prompt_type,total,correct,accuracy
+ministral_3_3b_reasoning,simple_yesno,16,15,93.75
+ministral_3_3b_reasoning,arbitrary_think,16,8,50.0
+ministral_3_3b_reasoning,system_format,16,15,93.75
+ministral_3_3b_instruct,simple_yesno,16,15,93.75
+ministral_3_3b_instruct,arbitrary_think,16,15,93.75
+ministral_3_3b_instruct,system_format,16,16,100.0
