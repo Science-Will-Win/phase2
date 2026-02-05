@@ -52,6 +52,10 @@ class GDPOBase:
         self.use_conditioned_rewards = self.gdpo_config.get("use_conditioned_rewards", False)
         self.condition_threshold = self.gdpo_config.get("condition_threshold", 1.0)
         self.target_length = self.gdpo_config.get("target_length", 1024)
+        
+        # Tool Reward config
+        self.enable_tool_reward = self.gdpo_config.get("enable_tool_reward", False)
+        self.tool_correctness_threshold = self.gdpo_config.get("tool_correctness_threshold", 0.0)
     
     def generate_samples(
         self, 
@@ -142,28 +146,76 @@ class GDPOBase:
         
         return expanded_refs
     
-    def get_reward_weights(self, num_objectives: int) -> List[float]:
+    def prepare_gt_tool_calls(
+        self, 
+        inputs: Dict[str, Any], 
+        effective_G: int
+    ) -> Optional[List[str]]:
+        """
+        Prepare expanded ground truth tool calls for reward calculation.
+        
+        Args:
+            inputs: Input dict containing optional 'gt_tool_calls' (list of strings)
+            effective_G: Effective group size (G or 2G)
+        
+        Returns:
+            expanded_gt_tools: List of GT tool call strings expanded to match batch size, or None
+        """
+        if not self.enable_tool_reward:
+            return None
+        
+        gt_tool_calls = inputs.get("gt_tool_calls", None)
+        if gt_tool_calls is None:
+            return None
+        
+        expanded_gt_tools = []
+        for gt in gt_tool_calls:
+            expanded_gt_tools.extend([gt] * effective_G)
+        
+        return expanded_gt_tools
+    
+    def get_reward_weights(self, num_objectives: int, has_uncertainty: bool = False, 
+                           has_tool_reward: bool = False) -> List[float]:
         """
         Get reward weights as a list.
         
+        Objective indices depend on which optional rewards are enabled:
+        - 0: Format (Easy)
+        - 1: Length (Easy)
+        - 2: Accuracy (Hard)
+        - 3: Uncertainty (Hardest) - if enabled
+        - 4/3: Tool Correctness (Medium) - if enabled
+        - 5/4: Tool Format (Easy) - if enabled
+        - Last: Temperature - if enabled
+        
         Args:
             num_objectives: Number of objectives
+            has_uncertainty: Whether uncertainty reward is enabled
+            has_tool_reward: Whether tool rewards are enabled
         
         Returns:
             List of weights for each objective
         """
         weights_config = self.gdpo_config.get("reward_weights", {})
         
+        # Base weights: Format, Length, Accuracy
         weights = [
             weights_config.get("format", 1.0),
             weights_config.get("length", 1.0),
             weights_config.get("accuracy", 1.0),
         ]
         
-        # Add more weights based on num_objectives
-        if num_objectives >= 4:
+        # Add Uncertainty weight (index 3)
+        if has_uncertainty:
             weights.append(weights_config.get("uncertainty", 1.0))
-        if num_objectives >= 5:
+        
+        # Add Tool weights (indices 4,5 or 3,4)
+        if has_tool_reward:
+            weights.append(weights_config.get("tool_correctness", 1.0))
+            weights.append(weights_config.get("tool_format", 1.0))
+        
+        # Temperature weight is added at the end if needed
+        if len(weights) < num_objectives:
             weights.append(weights_config.get("temperature", 1.0))
         
         return weights[:num_objectives]
@@ -292,6 +344,7 @@ class GDPOBase:
             "use_conditioned_rewards": self.use_conditioned_rewards,
             "condition_threshold": self.condition_threshold,
             "target_length": self.target_length,
+            "tool_correctness_threshold": self.tool_correctness_threshold,
         }
 
 
@@ -333,42 +386,235 @@ def condition_reward(easy_reward, hard_reward, threshold=1.0):
     return 0.0
 
 
+# =============================================================================
+# Tool Use Reward Functions
+# =============================================================================
+
+# Regex patterns for tool call parsing (from tools/adapters/mistral.py)
+TOOL_CALL_PATTERN_WITH_ARGS = r'\[TOOL_CALLS\](\w+)\[ARGS\](\{.*?\})(?=\[TOOL_CALLS\]|$|\s*$)'
+TOOL_CALL_PATTERN_NO_ARGS = r'\[TOOL_CALLS\](\w+)(\{.*?\})(?=\[TOOL_CALLS\]|$|\s*$)'
+# Simple pattern for format checking (no capture groups)
+TOOL_CALL_PATTERN_SIMPLE = r'\[TOOL_CALLS\]\w+(?:\[ARGS\])?\{.*?\}'
+
+
+def parse_tool_calls_for_reward(text: str) -> List[Dict[str, Any]]:
+    """
+    Extract tool calls from text for reward computation.
+    
+    Parses [TOOL_CALLS]tool_name[ARGS]{...} format used by Mistral models.
+    
+    Args:
+        text: LLM output text containing tool calls
+        
+    Returns:
+        List of tool calls: [{"name": str, "arguments": dict}, ...]
+    """
+    import json
+    
+    tool_calls = []
+    
+    # Try pattern with [ARGS] first
+    matches = re.findall(TOOL_CALL_PATTERN_WITH_ARGS, text, re.DOTALL)
+    
+    # If no matches, try pattern without [ARGS]
+    if not matches:
+        matches = re.findall(TOOL_CALL_PATTERN_NO_ARGS, text, re.DOTALL)
+    
+    for name, args_str in matches:
+        try:
+            arguments = json.loads(args_str)
+        except json.JSONDecodeError:
+            # Store empty dict if JSON parsing fails
+            arguments = {}
+        
+        tool_calls.append({
+            "name": name,
+            "arguments": arguments
+        })
+    
+    return tool_calls
+
+
+def compute_tool_format_reward(text: str, token_config) -> float:
+    """
+    Tool Format Reward - checks [TOOL_CALLS] appears after [/THINK].
+    
+    Note: [THINK]...[/THINK] structure is verified by Format Reward (Index 0).
+    This only checks tool call placement and format.
+    
+    Args:
+        text: LLM output text
+        token_config: Token configuration class with THINK_END
+        
+    Returns:
+        1.0 if tool call appears after [/THINK], 0.0 otherwise
+    """
+    think_end = token_config.THINK_END
+    
+    if not think_end:
+        # If no think tokens configured, just check for tool call
+        if '[TOOL_CALLS]' in text:
+            return 1.0
+        return 0.0
+    
+    # Find position of [/THINK]
+    think_end_pos = text.find(think_end)
+    if think_end_pos == -1:
+        return 0.0  # No [/THINK] found
+    
+    # Check for [TOOL_CALLS]tool_name{...} after [/THINK]
+    after_think = text[think_end_pos + len(think_end):]
+    
+    if re.search(TOOL_CALL_PATTERN_SIMPLE, after_think, re.DOTALL):
+        return 1.0
+    return 0.0
+
+
+def compute_tool_correctness_reward(
+    predicted_calls: List[Dict[str, Any]], 
+    gt_calls: List[Dict[str, Any]]
+) -> float:
+    """
+    Tool Correctness Reward (R_correct ∈ [-3, 3]) - GDPO Appendix C.
+    
+    Evaluates predicted tool calls against ground-truth calls using three components:
+    1. r_name: Tool name matching (Jaccard similarity)
+    2. r_param: Parameter name matching (Jaccard similarity per matched tool)
+    3. r_value: Parameter value matching (exact match count)
+    
+    This is a "Medium" level reward in the 4-level hierarchy.
+    
+    Args:
+        predicted_calls: List of predicted tool calls [{"name": str, "arguments": dict}, ...]
+        gt_calls: List of ground truth tool calls [{"name": str, "arguments": dict}, ...]
+        
+    Returns:
+        R_correct ∈ [-3, 3]: 6 * (R_max / S_max) - 3
+    """
+    if not gt_calls:
+        # No ground truth provided, return neutral score
+        return 0.0
+    
+    if not predicted_calls:
+        # No predictions, return minimum score
+        return -3.0
+    
+    # Extract tool names
+    gt_names = set(call.get("name", "") for call in gt_calls)
+    pred_names = set(call.get("name", "") for call in predicted_calls)
+    
+    # 1. Tool Name Matching: r_name = |N_G ∩ N_P| / |N_G ∪ N_P|
+    intersection = gt_names & pred_names
+    union = gt_names | pred_names
+    r_name = len(intersection) / len(union) if union else 0.0
+    
+    # 2. Parameter Name Matching and 3. Parameter Value Matching
+    # Match predicted calls to ground truth calls by tool name
+    r_param = 0.0
+    r_value = 0.0
+    
+    # Create lookup for predicted calls by name
+    pred_by_name = {}
+    for call in predicted_calls:
+        name = call.get("name", "")
+        if name not in pred_by_name:
+            pred_by_name[name] = []
+        pred_by_name[name].append(call)
+    
+    for gt_call in gt_calls:
+        gt_name = gt_call.get("name", "")
+        gt_args = gt_call.get("arguments", {})
+        gt_keys = set(gt_args.keys())
+        
+        # Find matching predicted call
+        if gt_name in pred_by_name and pred_by_name[gt_name]:
+            pred_call = pred_by_name[gt_name].pop(0)  # Match first available
+            pred_args = pred_call.get("arguments", {})
+            pred_keys = set(pred_args.keys())
+            
+            # Parameter name matching (Jaccard)
+            key_intersection = gt_keys & pred_keys
+            key_union = gt_keys | pred_keys
+            if key_union:
+                r_param += len(key_intersection) / len(key_union)
+            
+            # Parameter value matching (exact match)
+            for key in gt_keys:
+                gt_val = gt_args.get(key)
+                pred_val = pred_args.get(key)
+                if gt_val == pred_val:
+                    r_value += 1
+        # else: No matching prediction for this GT call, r_param and r_value stay 0
+    
+    # 4. Total Match Score: r_match = r_name + r_param + r_value
+    r_match = r_name + r_param + r_value
+    
+    # 5. S_max = 1 + |G| + Σ|keys(G_j)|
+    total_gt_keys = sum(len(call.get("arguments", {}).keys()) for call in gt_calls)
+    s_max = 1 + len(gt_calls) + total_gt_keys
+    
+    # Final: R_correct = 6 * (R_max / S_max) - 3
+    r_correct = 6.0 * (r_match / s_max) - 3.0 if s_max > 0 else -3.0
+    
+    # Clamp to [-3, 3]
+    return max(-3.0, min(3.0, r_correct))
+
+
 def compute_rewards(sequences, tokenizer, references=None, reward_config=None, 
                     token_config=None, num_objectives=3,
                     uncertainty_scores=None,
-                    temperature_rewards=None):
+                    temperature_rewards=None,
+                    gt_tool_calls=None):
     """
-    Computes rewards based on GDPO paper objectives:
-    1. Format Reward: Checks for [THINK]...[/THINK]<SPECIAL_36>...<SPECIAL_37> structure.
-    2. Length Penalty: Penalizes excessive length (Length Explosion).
-    3. Accuracy Reward: Checks against ground truth sequences (if provided).
-    4. Uncertainty Reward: Penalizes high uncertainty (optional, when uncertainty_scores provided).
-    5. Temperature Reward: Positive for low temp, negative for high temp (optional).
+    Computes rewards based on GDPO paper objectives with 4-level hierarchy.
+    
+    Reward Objectives:
+    - Index 0: Format Reward [0, 1] - Easy level
+    - Index 1: Length Penalty [0, 1] - Easy level
+    - Index 2: Accuracy Reward [0, 1] - Hard level
+    - Index 3: Uncertainty Reward [-1, 0] - Hardest level (optional)
+    - Index 4: Tool Correctness [-3, 3] - Medium level (optional, when gt_tool_calls provided)
+    - Index 5: Tool Format [0, 1] - Easy level (optional, when gt_tool_calls provided)
+    - Index 6: Temperature Reward [-1, 1] - Optional
+    
+    4-Level Hierarchy (when uncertainty_scores and gt_tool_calls provided):
+    - Level 1 (Hardest): Uncertainty - If fail, all below zeroed
+    - Level 2 (Hard): Accuracy - If fail, Tool Correct and Easy zeroed
+    - Level 3 (Medium): Tool Correctness - If fail, Easy zeroed
+    - Level 4 (Easy): Format, Length, Tool Format
     
     Args:
         sequences: Generated token sequences
         tokenizer: Tokenizer for decoding
         references: Ground truth references for accuracy check
         reward_config: Configuration dict with keys:
-            - condition_threshold (float): Threshold for accuracy to grant easy rewards (default 1.0)
+            - condition_threshold (float): Threshold for accuracy to grant lower rewards (default 1.0)
             - target_length (int): Target length for length penalty calculation
             - uncertainty_threshold (float): Threshold for uncertainty (default 0.6)
-              When uncertainty_scores provided, hierarchical conditioning is applied:
-              - Uncertainty >= threshold: -1 penalty, acc=0, easy rewards=0
-              - Uncertainty < threshold: -u penalty, then accuracy controls easy rewards
+            - tool_correctness_threshold (float): Threshold for Tool Correctness (default 0.0)
         token_config: Token configuration class (default: Ministral3TokenConfig)
         num_objectives: Number of reward objectives (default 3)
         uncertainty_scores: Optional (Batch*Group,) tensor of soft-scaled uncertainty scores
         temperature_rewards: Optional (Batch*Group,) tensor of temperature labels (+1 for low, -1 for high)
+        gt_tool_calls: Optional list of ground truth tool call strings in [TOOL_CALLS]... format
     
     Returns: (Batch * Group, num_objectives)
     """
     # Auto-adjust num_objectives based on provided scores
+    # Base: 3 (Format, Length, Accuracy)
+    # +1 for Uncertainty (index 3)
+    # +2 for Tool rewards (index 4: Tool Correctness, index 5: Tool Format)
+    # +1 for Temperature (last index)
     if uncertainty_scores is not None:
         num_objectives = max(num_objectives, 4)
+    if gt_tool_calls is not None:
+        # Tool Correctness at index 4, Tool Format at index 5
+        tool_correct_idx = 4 if uncertainty_scores is not None else 3
+        num_objectives = max(num_objectives, tool_correct_idx + 2)  # +2 for both tool rewards
     if temperature_rewards is not None:
-        temp_obj_idx = 4 if uncertainty_scores is not None else 3
-        num_objectives = max(num_objectives, temp_obj_idx + 1)
+        # Temperature goes at the end
+        temp_obj_idx = num_objectives
+        num_objectives = temp_obj_idx + 1
     
     batch_size = sequences.shape[0]
     texts = tokenizer.batch_decode(sequences, skip_special_tokens=True)
@@ -391,6 +637,7 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
         reward_config = {}
     condition_threshold = reward_config.get("condition_threshold", 1.0)
     target_len = reward_config.get("target_length", 1024)
+    tool_correctness_threshold = reward_config.get("tool_correctness_threshold", 0.0)
     
     # Generate regex pattern for format reward
     think_pattern = rf"{re.escape(token_config.THINK_START)}\s*\S+.*?{re.escape(token_config.THINK_END)}"
@@ -431,46 +678,93 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
             if ref_text in text:
                 acc_score = 1.0
         
-        # 4. Hierarchical Conditional Rewards (applied when uncertainty_scores provided)
-        # Level 1 (Hardest): Uncertainty → controls Accuracy and Easy rewards
-        # Level 2: Accuracy → controls Easy rewards (Format, Length)
-        uncertainty_reward = 0.0
+        # 4. Tool Rewards (when gt_tool_calls provided)
+        tool_correct_score = 0.0
+        tool_format_score = 0.0
         
+        if gt_tool_calls is not None and i < len(gt_tool_calls):
+            # Parse predicted tool calls from generated text
+            pred_calls = parse_tool_calls_for_reward(text)
+            
+            # Parse ground truth tool calls
+            gt_text = gt_tool_calls[i]
+            gt_calls = parse_tool_calls_for_reward(gt_text) if gt_text else []
+            
+            # Compute Tool Correctness (Medium level)
+            tool_correct_score = compute_tool_correctness_reward(pred_calls, gt_calls)
+            
+            # Compute Tool Format (Easy level)
+            tool_format_score = compute_tool_format_reward(text, token_config)
+        
+        # 5. Hierarchical Conditional Rewards (4-Level Cascade)
+        # Level 0: All pass, Level 1: Uncertainty fail, Level 2: Accuracy fail, Level 3: Tool Correct fail
+        uncertainty_reward = 0.0
+        failed_level = 0  # 0 = all pass
+        
+        # Determine failed level
         if uncertainty_scores is not None and i < len(uncertainty_scores):
             u = uncertainty_scores[i]
             if isinstance(u, torch.Tensor):
                 u = u.item()
             uncertainty_threshold = reward_config.get("uncertainty_threshold", 0.6)
             
-            # Level 1: Uncertainty (hardest)
             if u >= uncertainty_threshold:
-                # FAIL: Fixed penalty, zero out all lower levels
+                failed_level = 1  # Uncertainty fail
                 uncertainty_reward = -1.0
-                acc_score = 0.0
-                format_score = 0.0
-                length_score = 0.0
             else:
-                # PASS: Proportional penalty (lower u = smaller penalty)
                 uncertainty_reward = -u
-                
-                # Level 2: Accuracy (second hardest)
                 if acc_score < condition_threshold:
-                    # Accuracy FAIL: Zero out easy rewards only
-                    format_score = 0.0
-                    length_score = 0.0
-                # else: Accuracy PASS → keep easy rewards as calculated
+                    failed_level = 2  # Accuracy fail
+                elif gt_tool_calls is not None and tool_correct_score < tool_correctness_threshold:
+                    failed_level = 3  # Tool Correct fail
+        else:
+            # No uncertainty - check accuracy and tool correct
+            if acc_score < condition_threshold:
+                failed_level = 2
+            elif gt_tool_calls is not None and tool_correct_score < tool_correctness_threshold:
+                failed_level = 3
         
+        # Apply hierarchical zeroing based on failed level
+        if failed_level >= 1:  # Uncertainty fail → zero all below
+            acc_score = 0.0
+            tool_correct_score = 0.0
+            format_score = 0.0
+            length_score = 0.0
+            tool_format_score = 0.0
+        elif failed_level >= 2:  # Accuracy fail → zero Tool Correct and Easy
+            tool_correct_score = 0.0
+            format_score = 0.0
+            length_score = 0.0
+            tool_format_score = 0.0
+        elif failed_level >= 3:  # Tool Correct fail → zero Easy only
+            format_score = 0.0
+            length_score = 0.0
+            tool_format_score = 0.0
+        
+        # Assign rewards to tensor
         rewards[i, 0] = format_score
         rewards[i, 1] = length_score
         rewards[i, 2] = acc_score
         
-        # 5. Uncertainty Reward assignment
+        # 6. Uncertainty Reward assignment (index 3)
         if uncertainty_scores is not None:
             rewards[i, 3] = uncertainty_reward
         
-        # 6. Temperature Contrastive Reward (when temperature_rewards provided)
+        # 7. Tool Rewards assignment
+        if gt_tool_calls is not None:
+            tool_correct_idx = 4 if uncertainty_scores is not None else 3
+            rewards[i, tool_correct_idx] = tool_correct_score
+            rewards[i, tool_correct_idx + 1] = tool_format_score
+        
+        # 8. Temperature Contrastive Reward (at the end)
         if temperature_rewards is not None:
-            temp_obj_idx = 4 if uncertainty_scores is not None else 3
+            # Calculate temp index based on what's enabled
+            temp_obj_idx = 3  # Base index after Format, Length, Accuracy
+            if uncertainty_scores is not None:
+                temp_obj_idx += 1  # +1 for Uncertainty
+            if gt_tool_calls is not None:
+                temp_obj_idx += 2  # +2 for Tool Correctness and Tool Format
+            
             if i < len(temperature_rewards):
                 t = temperature_rewards[i]
                 if isinstance(t, torch.Tensor):
@@ -486,8 +780,10 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
 
 class GDPOLoss(GDPOBase):
     """
-    Standard GDPO with 3 objectives (Format, Length, Accuracy).
-    Optionally supports temperature contrastive (adds 4th objective).
+    Standard GDPO with 3+ objectives (Format, Length, Accuracy).
+    Optionally supports:
+    - Tool rewards (Tool Correctness, Tool Format) - adds 2 objectives
+    - Temperature contrastive - adds 1 objective
     """
     
     def __call__(
@@ -501,7 +797,7 @@ class GDPOLoss(GDPOBase):
         
         Args:
             model: Policy model
-            inputs: Input dict with 'input_ids', 'attention_mask', optional 'labels'
+            inputs: Input dict with 'input_ids', 'attention_mask', optional 'labels', 'gt_tool_calls'
             ref_model: Reference model for KL penalty (optional)
         
         Returns:
@@ -517,11 +813,18 @@ class GDPOLoss(GDPOBase):
         # 1. Generate samples
         sequences, temp_rewards, effective_G = self.generate_samples(model, input_ids, attention_mask)
         
-        # 2. Prepare references
+        # 2. Prepare references and GT tool calls
         expanded_refs = self.prepare_references(inputs, effective_G)
+        expanded_gt_tools = self.prepare_gt_tool_calls(inputs, effective_G)
         
         # 3. Determine num_objectives
-        n = 4 if temp_rewards is not None else 3
+        # Base: 3 (Format, Length, Accuracy)
+        n = 3
+        has_tool_reward = expanded_gt_tools is not None
+        if has_tool_reward:
+            n += 2  # Tool Correctness + Tool Format
+        if temp_rewards is not None:
+            n += 1  # Temperature
         
         # 4. Compute rewards
         reward_config = self.build_reward_config()
@@ -532,12 +835,13 @@ class GDPOLoss(GDPOBase):
             reward_config=reward_config,
             token_config=Ministral3TokenConfig,
             num_objectives=n,
-            temperature_rewards=temp_rewards
+            temperature_rewards=temp_rewards,
+            gt_tool_calls=expanded_gt_tools
         ).to(model.device)
         rewards = rewards_flat.view(B, effective_G, n)
         
         # 5. Compute advantages
-        weights = self.get_reward_weights(n)
+        weights = self.get_reward_weights(n, has_uncertainty=False, has_tool_reward=has_tool_reward)
         final_advantages_flat = self.compute_advantages(rewards, weights, model.device)
         
         # 6. Forward pass & log probs
@@ -569,8 +873,16 @@ class GDPOLoss(GDPOBase):
             "advantage_mean": final_advantages_flat.mean().item(),
             "advantage_std": final_advantages_flat.std().item(),
         }
+        
+        # Add tool reward logging if enabled
+        next_idx = 3
+        if has_tool_reward:
+            components["reward_tool_correctness"] = reward_means[next_idx].item()
+            components["reward_tool_format"] = reward_means[next_idx + 1].item()
+            next_idx += 2
+        
         if temp_rewards is not None:
-            components["reward_temperature"] = reward_means[3].item()
+            components["reward_temperature"] = reward_means[next_idx].item()
         
         # Memory cleanup
         del sequences, rewards_flat, rewards
@@ -585,25 +897,71 @@ class GDPOLoss(GDPOBase):
 
 class HeteroscedasticGDPOLoss(GDPOBase):
     """
-    GDPO with Uncertainty Reward (4 objectives: Format, Length, Accuracy, Uncertainty).
-    Optionally supports temperature contrastive (adds 5th objective).
+    GDPO with Uncertainty Reward (4+ objectives: Format, Length, Accuracy, Uncertainty).
+    Optionally supports:
+    - Tool rewards (Tool Correctness, Tool Format) - adds 2 objectives
+    - Temperature contrastive - adds 1 objective
+    
+    4-Level Hierarchy when tool rewards enabled:
+    - Level 1 (Hardest): Uncertainty
+    - Level 2 (Hard): Accuracy
+    - Level 3 (Medium): Tool Correctness
+    - Level 4 (Easy): Format, Length, Tool Format
     """
     
     def __init__(self, trainer: Any) -> None:
         super().__init__(trainer)
         self.uncertainty_threshold = self.gdpo_config.get("uncertainty_threshold", 0.6)
+        # Default False = reasoning only, True = full sequence
+        self.uncertainty_full_sequence = self.gdpo_config.get("uncertainty_full_sequence", False)
+    
+    def get_reasoning_mask(self, sequences: torch.Tensor) -> torch.Tensor:
+        """
+        Create mask for tokens inside [THINK]...[/THINK].
+        
+        Args:
+            sequences: Token IDs (batch_size, seq_len)
+        
+        Returns:
+            reasoning_mask: Float tensor (batch_size, seq_len) with 1s for reasoning tokens
+        """
+        batch_size, seq_len = sequences.shape
+        mask = torch.zeros_like(sequences, dtype=torch.float32)
+        
+        # Get token IDs for [THINK] and [/THINK]
+        think_start_id = self.tokenizer.convert_tokens_to_ids("[THINK]")
+        think_end_id = self.tokenizer.convert_tokens_to_ids("[/THINK]")
+        
+        for i in range(batch_size):
+            in_think = False
+            for j in range(seq_len):
+                token_id = sequences[i, j].item()
+                
+                if token_id == think_start_id:
+                    in_think = True
+                    mask[i, j] = 1.0  # Include [THINK] token
+                elif token_id == think_end_id:
+                    mask[i, j] = 1.0  # Include [/THINK] token
+                    in_think = False
+                elif in_think:
+                    mask[i, j] = 1.0
+        
+        return mask.to(sequences.device)
     
     def compute_uncertainty(
         self, 
         shift_logits: torch.Tensor, 
-        valid_mask: torch.Tensor
+        valid_mask: torch.Tensor,
+        reasoning_mask: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute uncertainty scores from logits std.
+        If reasoning_mask provided, only compute on [THINK]...[/THINK] section.
         
         Args:
             shift_logits: Shifted logits
             valid_mask: Valid token mask
+            reasoning_mask: Optional mask for reasoning tokens (1 inside [THINK]...[/THINK])
         
         Returns:
             sigma_per_sample: Raw sigma per sample
@@ -611,7 +969,16 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         """
         eps = 1e-8
         sigma_per_token = shift_logits.std(dim=-1)
-        sigma_per_sample = (sigma_per_token * valid_mask).sum(dim=1) / (valid_mask.sum(dim=1) + eps)
+        
+        # Combine masks: valid tokens AND reasoning tokens (if provided)
+        if reasoning_mask is not None:
+            # Shift reasoning_mask to match shift_logits (remove first token)
+            shifted_reasoning_mask = reasoning_mask[:, 1:]
+            combined_mask = valid_mask * shifted_reasoning_mask
+        else:
+            combined_mask = valid_mask
+        
+        sigma_per_sample = (sigma_per_token * combined_mask).sum(dim=1) / (combined_mask.sum(dim=1) + eps)
         uncertainty_scores = soft_scale(sigma_per_sample)
         return sigma_per_sample, uncertainty_scores
     
@@ -626,7 +993,7 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         
         Args:
             model: Policy model
-            inputs: Input dict with 'input_ids', 'attention_mask', optional 'labels'
+            inputs: Input dict with 'input_ids', 'attention_mask', optional 'labels', 'gt_tool_calls'
             ref_model: Reference model for KL penalty (optional)
         
         Returns:
@@ -642,19 +1009,34 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         # 1. Generate samples
         sequences, temp_rewards, effective_G = self.generate_samples(model, input_ids, attention_mask)
         
-        # 2. Prepare references
+        # 2. Prepare references and GT tool calls
         expanded_refs = self.prepare_references(inputs, effective_G)
+        expanded_gt_tools = self.prepare_gt_tool_calls(inputs, effective_G)
         
         # 3. Forward pass FIRST (to compute uncertainty)
         input_len = input_ids.shape[1]
         outputs, logits, shift_logits, shift_labels, token_log_probs, valid_mask = \
             self.compute_log_probs(model, sequences, input_len)
         
-        # 4. Compute uncertainty
-        sigma_per_sample, uncertainty_scores = self.compute_uncertainty(shift_logits, valid_mask)
+        # 4. Compute uncertainty (reasoning-only by default, full sequence if configured)
+        if self.uncertainty_full_sequence:
+            # Full sequence uncertainty
+            sigma_per_sample, uncertainty_scores = self.compute_uncertainty(shift_logits, valid_mask)
+        else:
+            # Reasoning-only uncertainty (default)
+            reasoning_mask = self.get_reasoning_mask(sequences)
+            sigma_per_sample, uncertainty_scores = self.compute_uncertainty(
+                shift_logits, valid_mask, reasoning_mask
+            )
         
         # 5. Determine num_objectives
-        n = 5 if temp_rewards is not None else 4
+        # Base: 4 (Format, Length, Accuracy, Uncertainty)
+        n = 4
+        has_tool_reward = expanded_gt_tools is not None
+        if has_tool_reward:
+            n += 2  # Tool Correctness + Tool Format
+        if temp_rewards is not None:
+            n += 1  # Temperature
         
         # 6. Compute rewards
         reward_config = self.build_reward_config()
@@ -667,12 +1049,13 @@ class HeteroscedasticGDPOLoss(GDPOBase):
             token_config=Ministral3TokenConfig,
             num_objectives=n,
             uncertainty_scores=uncertainty_scores.detach().cpu(),
-            temperature_rewards=temp_rewards
+            temperature_rewards=temp_rewards,
+            gt_tool_calls=expanded_gt_tools
         ).to(model.device)
         rewards = rewards_flat.view(B, effective_G, n)
         
         # 7. Compute advantages
-        weights = self.get_reward_weights(n)
+        weights = self.get_reward_weights(n, has_uncertainty=True, has_tool_reward=has_tool_reward)
         final_advantages_flat = self.compute_advantages(rewards, weights, model.device)
         
         # 8. KL penalty
@@ -704,8 +1087,16 @@ class HeteroscedasticGDPOLoss(GDPOBase):
             "advantage_mean": final_advantages_flat.mean().item(),
             "advantage_std": final_advantages_flat.std().item(),
         }
+        
+        # Add tool reward logging if enabled
+        next_idx = 4  # After Uncertainty
+        if has_tool_reward:
+            components["reward_tool_correctness"] = reward_means[next_idx].item()
+            components["reward_tool_format"] = reward_means[next_idx + 1].item()
+            next_idx += 2
+        
         if temp_rewards is not None:
-            components["reward_temperature"] = reward_means[4].item()
+            components["reward_temperature"] = reward_means[next_idx].item()
         
         # Memory cleanup
         del sequences, rewards_flat, rewards

@@ -10,56 +10,8 @@ from transformers import PreTrainedModel, PretrainedConfig
 # from ministral_3b import MinistralForCausalLM, MinistralConfig (Removed explicit import)
 import model_loader
 from utils import get_file_config
+from utils.model_utils import maybe_wrap_dataparallel, get_model_device, get_unwrapped_model
 
-
-# ============================================================================
-# DataParallel Utility Functions
-# ============================================================================
-
-def maybe_wrap_dataparallel(model):
-    """Wrap model with DataParallel if multiple GPUs are available.
-    
-    Args:
-        model: PyTorch model to potentially wrap
-        
-    Returns:
-        DataParallel-wrapped model if multiple GPUs, otherwise original model
-    """
-    if torch.cuda.device_count() > 1:
-        print(f"[INFO] Using DataParallel with {torch.cuda.device_count()} GPUs")
-        model = nn.DataParallel(model)
-    return model
-
-
-def get_model_device(model):
-    """Get device of a model, handling DataParallel wrapper.
-    
-    Args:
-        model: PyTorch model (may be wrapped in DataParallel)
-        
-    Returns:
-        torch.device where the model parameters reside
-    """
-    if isinstance(model, nn.DataParallel):
-        return next(model.module.parameters()).device
-    return next(model.parameters()).device
-
-
-def get_unwrapped_model(model):
-    """Get the underlying model (unwrap DataParallel if needed).
-    
-    Args:
-        model: PyTorch model (may be wrapped in DataParallel)
-        
-    Returns:
-        The underlying model without DataParallel wrapper
-    """
-    if isinstance(model, nn.DataParallel):
-        return model.module
-    return model
-
-
-# ============================================================================
 
 # Dictionary to store default configurations
 # Keys must match the model_type (filename)

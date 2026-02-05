@@ -29,25 +29,9 @@ from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 import mimetypes
 
-# ============================================================================
 # Early GPU Configuration (MUST be before torch import)
-# ============================================================================
-_gpu_parser = argparse.ArgumentParser(add_help=False)
-_gpu_parser.add_argument("--local", action="store_true")
-_gpu_parser.add_argument("--gpu", type=str, default=None)
-_gpu_args, _ = _gpu_parser.parse_known_args()
-
-# Determine GPU default based on --local flag
-if _gpu_args.gpu is not None:
-    _gpu_ids = _gpu_args.gpu
-elif _gpu_args.local:
-    _gpu_ids = "0"  # Local mode: single GPU
-else:
-    _gpu_ids = "6,7"  # Server mode: multi GPU
-
-os.environ["CUDA_VISIBLE_DEVICES"] = _gpu_ids
-print(f"[GPU] Using CUDA_VISIBLE_DEVICES={_gpu_ids}")
-# ============================================================================
+from utils.gpu_config import configure_gpu
+configure_gpu()
 
 import torch
 import torch.nn as nn
@@ -89,18 +73,7 @@ global_args = None
 global_server = None  # HTTP server instance for cleanup
 
 
-def get_model_device(model):
-    """Get device of a model, handling DataParallel wrapper."""
-    if isinstance(model, nn.DataParallel):
-        return next(model.module.parameters()).device
-    return next(model.parameters()).device
-
-
-def get_unwrapped_model(model):
-    """Get the underlying model (unwrap DataParallel if needed)."""
-    if isinstance(model, nn.DataParallel):
-        return model.module
-    return model
+from utils.model_utils import get_model_device, get_unwrapped_model
 
 
 def cleanup():

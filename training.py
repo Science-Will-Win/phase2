@@ -2,25 +2,9 @@ import argparse
 import os
 import sys
 
-# ============================================================================
 # Early GPU Configuration (MUST be before torch import)
-# ============================================================================
-_gpu_parser = argparse.ArgumentParser(add_help=False)
-_gpu_parser.add_argument("--local", action="store_true")
-_gpu_parser.add_argument("--gpu", type=str, default=None)
-_gpu_args, _ = _gpu_parser.parse_known_args()
-
-# Determine GPU default based on --local flag
-if _gpu_args.gpu is not None:
-    _gpu_ids = _gpu_args.gpu
-elif _gpu_args.local:
-    _gpu_ids = "0"  # Local mode: single GPU
-else:
-    _gpu_ids = "6,7"  # Server mode: multi GPU
-
-os.environ["CUDA_VISIBLE_DEVICES"] = _gpu_ids
-print(f"[GPU] Using CUDA_VISIBLE_DEVICES={_gpu_ids}")
-# ============================================================================
+from utils.gpu_config import configure_gpu
+configure_gpu()
 
 import torch
 import gc
@@ -357,6 +341,7 @@ def run_training(args):
             "high_temperature": args.gdpo_high_temperature,
             # Uncertainty Reward
             "uncertainty_threshold": args.gdpo_uncertainty_threshold,
+            "uncertainty_full_sequence": args.gdpo_uncertainty_full_sequence,
             # Heteroscedastic weight (legacy, for heteroscedastic_gdpo before refactor)
             "heteroscedastic_weight": args.heteroscedastic_weight,
         }
@@ -456,6 +441,8 @@ if __name__ == "__main__":
                         help="Uncertainty threshold for penalty (default: 0.6)")
     parser.add_argument("--gdpo_reward_weight_uncertainty", type=float, default=1.0,
                         help="Weight for uncertainty reward (heteroscedastic_gdpo)")
+    parser.add_argument("--gdpo_uncertainty_full_sequence", action="store_true",
+                        help="Measure uncertainty on full sequence instead of reasoning section only (default: reasoning only)")
     
     # Heteroscedastic Loss Arguments
     parser.add_argument("--heteroscedastic_T", type=int, default=3,

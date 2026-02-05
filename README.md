@@ -197,14 +197,6 @@ Collect preference data with UI:
 python rlhf_collect.py --data_path data/sample.json --model ministral_3_3b_instruct
 ```
 
-### Chat Log Viewer
-
-View saved conversation logs:
-
-```bash
-python chat_viewer.py
-```
-
 ## Memory Requirements
 
 | Configuration | Approx. VRAM |
@@ -221,7 +213,6 @@ pre-aiffel/
 ├── training.py          # Training script
 ├── inference.py         # Inference script (Web UI / CLI)
 ├── rlhf_collect.py      # RLHF data collection
-├── chat_viewer.py       # Chat log viewer
 ├── GDPO.py              # GDPO loss function
 ├── model.py             # Model loader
 ├── architectures/       # Model architecture definitions
