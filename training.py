@@ -333,7 +333,7 @@ def run_training(args):
                 "temperature": args.gdpo_reward_weight_temperature,
             },
             "use_conditioned_rewards": args.gdpo_use_conditioned_rewards,
-            "condition_threshold": args.gdpo_condition_threshold,
+            "accuracy_threshold": args.gdpo_accuracy_threshold,
             "target_length": args.gdpo_target_length,
             # Temperature Contrastive
             "use_temperature_contrastive": args.gdpo_use_temperature_contrastive,
@@ -342,6 +342,8 @@ def run_training(args):
             # Uncertainty Reward
             "uncertainty_threshold": args.gdpo_uncertainty_threshold,
             "uncertainty_full_sequence": args.gdpo_uncertainty_full_sequence,
+            # Tool Correctness
+            "tool_correctness_threshold": args.gdpo_tool_correctness_threshold,
             # Heteroscedastic weight (legacy, for heteroscedastic_gdpo before refactor)
             "heteroscedastic_weight": args.heteroscedastic_weight,
         }
@@ -421,8 +423,8 @@ if __name__ == "__main__":
                         help="Weight for accuracy reward")
     parser.add_argument("--gdpo_use_conditioned_rewards", action="store_true",
                         help="Enable conditioning easier rewards on accuracy")
-    parser.add_argument("--gdpo_condition_threshold", type=float, default=1.0,
-                        help="Accuracy threshold for conditioned rewards")
+    parser.add_argument("--gdpo_accuracy_threshold", type=float, default=1.0,
+                        help="Accuracy threshold for conditioned rewards (default: 1.0, binary accuracy)")
     parser.add_argument("--gdpo_target_length", type=int, default=1024,
                         help="Target length for length penalty calculation")
     
@@ -443,6 +445,10 @@ if __name__ == "__main__":
                         help="Weight for uncertainty reward (heteroscedastic_gdpo)")
     parser.add_argument("--gdpo_uncertainty_full_sequence", action="store_true",
                         help="Measure uncertainty on full sequence instead of reasoning section only (default: reasoning only)")
+    
+    # GDPO Tool Correctness Arguments
+    parser.add_argument("--gdpo_tool_correctness_threshold", type=float, default=1.5,
+                        help="Tool correctness threshold for conditioned rewards (default: 1.5, ~75%% match required)")
     
     # Heteroscedastic Loss Arguments
     parser.add_argument("--heteroscedastic_T", type=int, default=3,

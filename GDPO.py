@@ -50,12 +50,12 @@ class GDPOBase:
         
         # Reward config
         self.use_conditioned_rewards = self.gdpo_config.get("use_conditioned_rewards", False)
-        self.condition_threshold = self.gdpo_config.get("condition_threshold", 1.0)
+        self.accuracy_threshold = self.gdpo_config.get("accuracy_threshold", 1.0)
         self.target_length = self.gdpo_config.get("target_length", 1024)
         
         # Tool Reward config
         self.enable_tool_reward = self.gdpo_config.get("enable_tool_reward", False)
-        self.tool_correctness_threshold = self.gdpo_config.get("tool_correctness_threshold", 0.0)
+        self.tool_correctness_threshold = self.gdpo_config.get("tool_correctness_threshold", 1.5)
     
     def generate_samples(
         self, 
@@ -342,7 +342,7 @@ class GDPOBase:
         """Build reward configuration dict."""
         return {
             "use_conditioned_rewards": self.use_conditioned_rewards,
-            "condition_threshold": self.condition_threshold,
+            "accuracy_threshold": self.accuracy_threshold,
             "target_length": self.target_length,
             "tool_correctness_threshold": self.tool_correctness_threshold,
         }
@@ -588,10 +588,10 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
         tokenizer: Tokenizer for decoding
         references: Ground truth references for accuracy check
         reward_config: Configuration dict with keys:
-            - condition_threshold (float): Threshold for accuracy to grant lower rewards (default 1.0)
+            - accuracy_threshold (float): Threshold for accuracy to grant lower rewards (default 1.0)
             - target_length (int): Target length for length penalty calculation
             - uncertainty_threshold (float): Threshold for uncertainty (default 0.6)
-            - tool_correctness_threshold (float): Threshold for Tool Correctness (default 0.0)
+            - tool_correctness_threshold (float): Threshold for Tool Correctness (default 1.5, ~75% match)
         token_config: Token configuration class (default: Ministral3TokenConfig)
         num_objectives: Number of reward objectives (default 3)
         uncertainty_scores: Optional (Batch*Group,) tensor of soft-scaled uncertainty scores
@@ -635,9 +635,9 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
     # Parse reward_config
     if reward_config is None:
         reward_config = {}
-    condition_threshold = reward_config.get("condition_threshold", 1.0)
+    accuracy_threshold = reward_config.get("accuracy_threshold", 1.0)
     target_len = reward_config.get("target_length", 1024)
-    tool_correctness_threshold = reward_config.get("tool_correctness_threshold", 0.0)
+    tool_correctness_threshold = reward_config.get("tool_correctness_threshold", 1.5)
     
     # Generate regex pattern for format reward
     think_pattern = rf"{re.escape(token_config.THINK_START)}\s*\S+.*?{re.escape(token_config.THINK_END)}"
@@ -713,13 +713,13 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
                 uncertainty_reward = -1.0
             else:
                 uncertainty_reward = -u
-                if acc_score < condition_threshold:
+                if acc_score < accuracy_threshold:
                     failed_level = 2  # Accuracy fail
                 elif gt_tool_calls is not None and tool_correct_score < tool_correctness_threshold:
                     failed_level = 3  # Tool Correct fail
         else:
             # No uncertainty - check accuracy and tool correct
-            if acc_score < condition_threshold:
+            if acc_score < accuracy_threshold:
                 failed_level = 2
             elif gt_tool_calls is not None and tool_correct_score < tool_correctness_threshold:
                 failed_level = 3

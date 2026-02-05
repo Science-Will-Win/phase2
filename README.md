@@ -1,6 +1,6 @@
-# Ministral 3 Fine-Tuning Framework
+# Aigen-R0
 
-A fine-tuning framework for Mistral AI's Ministral 3 3B model.
+A reasoning-enhanced LLM fine-tuned from Mistral AI's Ministral 3 3B using GDPO (Group reward-Decoupled Policy Optimization).
 
 ## Requirements
 
@@ -89,7 +89,20 @@ python training.py --model_type ministral_3_3b_instruct --model_path model/train
 | `--gdpo_group_size` | 4 | Number of responses to generate per input |
 | `--gdpo_kl_coef` | 0.01 | KL divergence penalty coefficient |
 | `--gdpo_use_conditioned_rewards` | False | Condition easier rewards on harder ones |
-| `--gdpo_condition_threshold` | 1.0 | Threshold for conditioned rewards |
+
+**Hierarchical Reward Thresholds:**
+
+| Threshold | Default | Description |
+|-----------|---------|-------------|
+| `--gdpo_accuracy_threshold` | 1.0 | Accuracy threshold (binary: 1=correct, 0=incorrect) |
+| `--gdpo_uncertainty_threshold` | 0.6 | Uncertainty threshold for penalty |
+| `--gdpo_tool_correctness_threshold` | 1.5 | Tool correctness threshold (~75% match required) |
+
+The hierarchical reward system works as follows:
+1. **Uncertainty** (hardest): If fail, all lower rewards are zeroed
+2. **Accuracy** (hard): If fail, Tool Correctness and Easy rewards are zeroed
+3. **Tool Correctness** (medium): If fail, Easy rewards are zeroed
+4. **Easy rewards** (Format, Length, Tool Format): Granted only if all above pass
 
 ## GPU Configuration
 
@@ -144,7 +157,7 @@ python training.py --model_type ministral_3_3b_instruct --data_path data/sample.
 | `--epochs` | 1 | Number of epochs |
 | `--batch_size` | 2 | Batch size |
 | `--learning_rate` | 2e-5 | Learning rate |
-| `--loss_type` | cross_entropy | Loss function (`cross_entropy`, `gdpo`, `heteroscedastic_gdpo`) |
+| `--loss_type` | cross_entropy | Loss function: `cross_entropy` (SFT), `gdpo`, `heteroscedastic_gdpo` |
 | `--freeze_until_layer` | - | Freeze layers 0 to N (-1: freeze all) |
 | `--local` | False | Use local paths |
 | `--gpu` | 6,7 or 0 | GPU IDs to use |
@@ -209,7 +222,7 @@ python rlhf_collect.py --data_path data/sample.json --model ministral_3_3b_instr
 ## Project Structure
 
 ```
-pre-aiffel/
+aigen-r0/
 ├── training.py          # Training script
 ├── inference.py         # Inference script (Web UI / CLI)
 ├── rlhf_collect.py      # RLHF data collection
@@ -224,4 +237,4 @@ pre-aiffel/
 
 ## License
 
-This project is for educational and research purposes. Model weights are subject to Mistral AI's Apache 2.0 license.
+Aigen-R0 is built upon Ministral 3 3B. Model weights are subject to Mistral AI's Apache 2.0 license.
