@@ -84,6 +84,42 @@ SFT with Learned Uncertainty (Kendall & Gal, 2017):
 python training.py --model_type ministral_3_3b_instruct --data_path data/train.json --loss_type heteroscedastic_uncertainty --epochs 3 --freeze_until_layer 24
 ```
 
+SFT with Non-Learnable Uncertainty (sigma from logits.std()):
+```bash
+python training.py --local \
+    --model_type <your_model_type> \
+    --loss_type non_learnable_heteroscedastic_uncertainty \
+    --data_path <your_data.json> \
+    --epochs 100 \
+    --batch_size 32 \
+    --freeze_until_layer 13 \
+    --val_ratio 0.3 \
+    --early_stopping_patience 5 \
+    --heteroscedastic_T 32 \
+    --track_token_errors \
+    --debug \
+    --save_strategy no
+```
+
+Where:
+- `<your_model_type>`: Model type to use (e.g., `ministral_3_3b_instruct`)
+- `<your_data.json>`: Path to training data (e.g., `data/train.json`)
+
+Key options:
+- `--freeze_until_layer 13`: Freeze first 13 layers (train ~60% of model)
+- `--val_ratio 0.3`: 30% validation split
+- `--early_stopping_patience 5`: Stop if no improvement for 5 epochs
+- `--heteroscedastic_T 32`: 32 Monte Carlo samples for uncertainty estimation
+- `--track_token_errors`: Track per-token prediction errors
+- `--save_strategy no`: Don't save intermediate checkpoints
+
+**Heteroscedastic Loss Types:**
+
+| Loss Type | Sigma Source | Description |
+|-----------|--------------|-------------|
+| `heteroscedastic_uncertainty` | Learned (model output) | Model learns per-token uncertainty |
+| `non_learnable_heteroscedastic_uncertainty` | `logits.std()` | Uses logit standard deviation as uncertainty |
+
 **Heteroscedastic Uncertainty Loss:**
 
 The model learns per-token uncertainty σ alongside predictions. The loss uses Monte Carlo sampling:
