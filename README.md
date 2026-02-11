@@ -86,9 +86,24 @@ python training.py --model_type ministral_3_3b_instruct --data_path data/train.j
 
 SFT with Non-Learnable Uncertainty (sigma from logits.std()):
 ```bash
+python training.py --model_type ministral_3_3b_instruct --data_path data/train.json --loss_type non_learnable_heteroscedastic_uncertainty --epochs 3 --freeze_until_layer 24
+```
+
+**Heteroscedastic Loss Types:**
+
+| Loss Type | Sigma Source | Description |
+|-----------|--------------|-------------|
+| `heteroscedastic_uncertainty` | Learned (model output) | Model learns per-token uncertainty |
+| `non_learnable_heteroscedastic_uncertainty` | `logits.std()` | Uses logit standard deviation as uncertainty |
+
+**Full Training Example:**
+
+Below is a comprehensive example showing commonly used training options:
+
+```bash
 python training.py --local \
     --model_type <your_model_type> \
-    --loss_type non_learnable_heteroscedastic_uncertainty \
+    --loss_type <loss_type> \
     --data_path <your_data.json> \
     --epochs 100 \
     --batch_size 32 \
@@ -102,23 +117,17 @@ python training.py --local \
 ```
 
 Where:
-- `<your_model_type>`: Model type to use (e.g., `ministral_3_3b_instruct`)
-- `<your_data.json>`: Path to training data (e.g., `data/train.json`)
+- `<your_model_type>`: Model type (e.g., `ministral_3_3b_instruct`)
+- `<loss_type>`: Loss function (`cross_entropy`, `heteroscedastic_uncertainty`, `non_learnable_heteroscedastic_uncertainty`)
+- `<your_data.json>`: Training data path (e.g., `data/train.json`)
 
 Key options:
 - `--freeze_until_layer 13`: Freeze first 13 layers (train ~60% of model)
 - `--val_ratio 0.3`: 30% validation split
 - `--early_stopping_patience 5`: Stop if no improvement for 5 epochs
-- `--heteroscedastic_T 32`: 32 Monte Carlo samples for uncertainty estimation
+- `--heteroscedastic_T 32`: 32 Monte Carlo samples (for heteroscedastic loss types)
 - `--track_token_errors`: Track per-token prediction errors
 - `--save_strategy no`: Don't save intermediate checkpoints
-
-**Heteroscedastic Loss Types:**
-
-| Loss Type | Sigma Source | Description |
-|-----------|--------------|-------------|
-| `heteroscedastic_uncertainty` | Learned (model output) | Model learns per-token uncertainty |
-| `non_learnable_heteroscedastic_uncertainty` | `logits.std()` | Uses logit standard deviation as uncertainty |
 
 **Heteroscedastic Uncertainty Loss:**
 
