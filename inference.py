@@ -235,7 +235,7 @@ def generate_with_refusal_streaming(model, tokenizer, inputs, args):
     elif isinstance(inputs, dict) and 'pixel_values' in inputs and inputs['pixel_values'] is not None:
         pixel_values = inputs['pixel_values'].to(device)
     
-    vocab_size = model.config.vocab_size
+    vocab_size = get_unwrapped_model(model).config.vocab_size
     
     # Get refusal parameters with defaults
     threshold = getattr(args, 'refusal_threshold', 3.0)
