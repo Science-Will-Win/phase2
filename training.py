@@ -29,7 +29,7 @@ def run_training(args):
     from tokenizer import TokenizerManager
     import loss as loss_module
     import dataset as dataset_module
-    from training_logger import TrainingLogger, CSVLoggingCallback, EvalAccuracyCallback
+    from training_logger import TrainingLogger, CSVLoggingCallback, EvalAccuracyCallback, EpochSummaryCallback
     from utils import get_file_config, get_token_config
     from utils.paths import set_local_mode, get_model_dir, get_result_dir
     
@@ -108,6 +108,12 @@ def run_training(args):
                 if debug:
                     print("[DEBUG] TokenErrorTracker initialized (eval_dataset detected or track_token_errors=True)")
             
+            # Epoch-level accumulator for summary logging
+            self.epoch_loss_sum = 0.0
+            self.epoch_accuracy_sum = 0.0
+            self.epoch_step_count = 0
+            self.log_every_n_epochs = 1  # Default, will be set after trainer creation
+            
             if debug:
                 print(f"[DEBUG] CustomTrainer initialized with loss_type: {self.loss_type}")
 
@@ -160,14 +166,25 @@ def run_training(args):
                             predict_ids, skip_special_tokens=True
                         )
                 
-                self.logger.log(
-                    step=self.state.global_step,
-                    epoch=int(self.state.epoch) + 1 if self.state.epoch is not None else 1,
-                    loss_result=loss_result,
-                    predict=predict_text,
-                    label=label_text,
-                    accuracy=train_accuracy
-                )
+                current_epoch = int(self.state.epoch) + 1 if self.state.epoch is not None else 1
+                
+                # Accumulate epoch-level statistics (for summary logging)
+                current_loss = loss_result.total_loss.item() if hasattr(loss_result.total_loss, 'item') else loss_result.total_loss
+                self.epoch_loss_sum += current_loss
+                self.epoch_accuracy_sum += train_accuracy if train_accuracy is not None else 0.0
+                self.epoch_step_count += 1
+                
+                # Detailed logging: only every N epochs
+                log_every_n = getattr(self, 'log_every_n_epochs', 1)
+                if log_every_n == 1 or current_epoch % log_every_n == 0:
+                    self.logger.log(
+                        step=self.state.global_step,
+                        epoch=current_epoch,
+                        loss_result=loss_result,
+                        predict=predict_text,
+                        label=label_text,
+                        accuracy=train_accuracy
+                    )
             
             if return_outputs:
                 return (loss_result.total_loss, loss_result.outputs)
@@ -416,12 +433,19 @@ def run_training(args):
         )
         trainer.processing_class = tokenizer # Ensure trainer has tokenizer for GDPO
         trainer.ref_model = ref_model # Attach ref_model for GDPO
+        trainer.log_every_n_epochs = args.log_every_n_epochs  # Set epoch logging frequency
         
         # Add EvalAccuracyCallback after trainer is created (needs trainer reference)
         if eval_dataset is not None:
             trainer.add_callback(EvalAccuracyCallback(trainer, logger))
             if args.debug:
                 print("[DEBUG] EvalAccuracyCallback added for epoch-level accuracy tracking")
+        
+        # Add EpochSummaryCallback for epoch-level training summary logging
+        epoch_summary_callback = EpochSummaryCallback(trainer, logger)
+        trainer.add_callback(epoch_summary_callback)
+        if args.debug:
+            print(f"[DEBUG] EpochSummaryCallback added (log_every_n_epochs={args.log_every_n_epochs})")
         
         # Attach GDPO configuration to trainer
         trainer.gdpo_config = {
@@ -523,6 +547,8 @@ if __name__ == "__main__":
                         help="Data property name for stratified split (e.g., 'type', 'task'). None=random split")
     parser.add_argument("--track_token_errors", action="store_true",
                         help="Track and save token-level prediction errors (validation only)")
+    parser.add_argument("--log_every_n_epochs", type=int, default=1,
+                        help="Log detailed training samples every N epochs (default: 1 = every epoch)")
     # parser.add_argument("--output_dir", type=str, default="fine_tuned_model") # We override this now
     
     # Standard HF Save Strategy Arguments

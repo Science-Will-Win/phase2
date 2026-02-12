@@ -515,6 +515,22 @@ Output:
   - Useful for analyzing model mistakes
 """,
 
+    "log_every_n_epochs": """--log_every_n_epochs: Control detailed training log frequency
+
+Usage:
+  --log_every_n_epochs 1     Log every epoch (default)
+  --log_every_n_epochs 5     Log detailed records every 5 epochs
+
+Behavior:
+  - Detailed logs: predict/label/step-loss recorded every N epochs
+  - Epoch summary: avg train_loss/accuracy logged EVERY epoch
+  - Validation: eval_loss/accuracy logged every epoch (unchanged)
+
+Use case:
+  - Large datasets (500K+ samples): set to 5 to reduce CSV size ~80%
+  - Epoch summary still provides training progress overview
+""",
+
     "freeze_until_layer": """--freeze_until_layer: Freeze model layers up to specified layer
 
 Usage:

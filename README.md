@@ -197,6 +197,7 @@ Key options:
 - `--heteroscedastic_T 32`: 32 Monte Carlo samples (for heteroscedastic loss types)
 - `--heteroscedastic_sequential`: Sequential MC sampling for lower memory (optional)
 - `--track_token_errors`: Track per-token prediction errors
+- `--log_every_n_epochs N`: Log detailed training samples every N epochs (default: 1). Set higher to reduce CSV size for large datasets
 - `--save_strategy no`: Don't save intermediate checkpoints
 
 ## GPU Configuration

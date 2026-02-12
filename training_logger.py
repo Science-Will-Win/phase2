@@ -247,6 +247,51 @@ class EvalAccuracyCallback(TrainerCallback):
         return control
 
 
+class EpochSummaryCallback(TrainerCallback):
+    """
+    Callback to log epoch-level training summary.
+    Logs average loss and accuracy at the end of each epoch.
+    
+    This provides aggregate statistics even when detailed logging
+    is disabled (via log_every_n_epochs > 1).
+    """
+    
+    def __init__(self, trainer_ref, logger: TrainingLogger):
+        """
+        Args:
+            trainer_ref: Reference to the CustomTrainer (to access epoch accumulators)
+            logger: TrainingLogger instance (to log train_loss/train_accuracy)
+        """
+        self.trainer_ref = trainer_ref
+        self.logger = logger
+    
+    def on_epoch_end(self, args, state, control, **kwargs):
+        """Log epoch average loss and accuracy, then reset accumulators."""
+        trainer = self.trainer_ref
+        epoch = int(state.epoch) if state.epoch else 0
+        
+        if trainer.epoch_step_count > 0:
+            avg_loss = trainer.epoch_loss_sum / trainer.epoch_step_count
+            avg_acc = trainer.epoch_accuracy_sum / trainer.epoch_step_count
+            
+            self.logger.log(
+                step=state.global_step,
+                epoch=epoch,
+                train_loss=avg_loss,
+                train_accuracy=avg_acc
+            )
+            
+            # Print summary for debugging
+            print(f"[EpochSummaryCallback] Epoch {epoch} - Avg Train Loss: {avg_loss:.4f}, Avg Train Accuracy: {avg_acc:.2f}%")
+        
+        # Reset for next epoch
+        trainer.epoch_loss_sum = 0.0
+        trainer.epoch_accuracy_sum = 0.0
+        trainer.epoch_step_count = 0
+        
+        return control
+
+
 class TokenErrorTracker:
     """
     Tracks token-level prediction errors during validation.
