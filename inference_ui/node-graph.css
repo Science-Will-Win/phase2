@@ -191,6 +191,7 @@
     --port-vector3: #5c6bc0;
     --port-vector4: #7e57c2;
     --port-color: #ec407a;
+    --port-table: #78909c;
 }
 
 /* ---- Port Rows (multi-port distribution) ---- */
@@ -250,6 +251,7 @@
 .ng-port[data-port-type="vector3"] { border-color: var(--port-vector3); }
 .ng-port[data-port-type="vector4"] { border-color: var(--port-vector4); }
 .ng-port[data-port-type="color"]   { border-color: var(--port-color); }
+.ng-port[data-port-type="table"]   { border-color: var(--port-table); }
 
 .ng-port[data-port-type="float"]:hover   { background: var(--port-float); border-color: var(--port-float); }
 .ng-port[data-port-type="int"]:hover     { background: var(--port-int); border-color: var(--port-int); }
@@ -265,6 +267,7 @@
 .ng-port[data-port-type="vector3"]:hover { background: var(--port-vector3); border-color: var(--port-vector3); }
 .ng-port[data-port-type="vector4"]:hover { background: var(--port-vector4); border-color: var(--port-vector4); }
 .ng-port[data-port-type="color"]:hover   { background: var(--port-color); border-color: var(--port-color); }
+.ng-port[data-port-type="table"]:hover   { background: var(--port-table); border-color: var(--port-table); }
 
 .ng-port-compatible {
     box-shadow: 0 0 3px currentColor;
@@ -367,6 +370,7 @@
 .ng-conn-type-vector3 { stroke: var(--port-vector3); }
 .ng-conn-type-vector4 { stroke: var(--port-vector4); }
 .ng-conn-type-color   { stroke: var(--port-color); }
+.ng-conn-type-table   { stroke: var(--port-table); }
 
 /* ---- Input Node Styles ---- */
 

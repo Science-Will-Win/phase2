@@ -127,7 +127,8 @@ Node files are discovered automatically via the `/api/node-manifest` endpoint. R
 | `updateStatus(el, status)` | function | No | Custom UI update on status change |
 | `updateResult(el, resultText)` | function | No | Update result text display |
 | `dataOnly` | boolean | No | Marks a data-only node |
-| `sideEffect` | boolean | No | Marks a node with side effects |
+| `result` | boolean | No | Marks a node that produces a visible result (display, save) |
+| `resolveOutputType` | function | No | Dynamic output type resolver. Receives an array of connected input types and returns the resolved output type string. See the Add node for an example. |
 | `allowRef` | boolean | No | Allows the node to receive reference connections. Only LLM-using nodes (General: Step/Composite, all Tool nodes) should set this to `true`. Nodes without `allowRef: true` will have their ports dimmed and will reject ref connections. |
 
 ### Port Definition
@@ -159,7 +160,8 @@ The system uses a `PortTypes` registry (defined in `node-registry.js`) that supp
 | `vector3` | 3D vector | `vector3`, `numeric`, `addable`, `any`, `string` |
 | `vector4` | 4D vector | `vector4`, `numeric`, `addable`, `any`, `string` |
 | `color` | RGBA color | `color`, `numeric`, `addable`, `any`, `string` |
-| `data` | File/data object | `data`, `any`, `string` |
+| `data` | File/data object | `data`, `table`, `any`, `string` |
+| `table` | Tabular data | `table`, `any`, `string` |
 | `image` | Image data | `image` only |
 
 #### Group Types (used as input port types)
@@ -175,12 +177,13 @@ A group-typed output (e.g. `numeric`) is compatible with another group input if 
 
 - `image` is isolated: it can only flow-connect to `image` inputs (e.g. Composite's Image port)
 - `any` is compatible with everything except `image`
+- `table` inputs accept `table` and `data` outputs
 - Group inputs (`numeric`, `addable`) accept any registered member type
 - `string` input ports accept any output type (coercion)
 - `float` input ports also accept `int` outputs (promotion)
 - Otherwise, types must match exactly
 
-**Reference connections** bypass port type restrictions, but are only accepted by nodes with `allowRef: true` (Step, Composite, and all Tool nodes). Nodes without this property (Input, Data, Math, sideEffect nodes) will reject reference connections. Allowed nodes are additionally subject to the max attachments limit.
+**Reference connections** bypass port type restrictions, but are only accepted by nodes with `allowRef: true` (Step, Composite, and all Tool nodes). Nodes without this property (Input, Data, Math, result nodes) will reject reference connections. Allowed nodes are additionally subject to the max attachments limit.
 
 ### Registering Custom Port Types
 
@@ -203,6 +206,32 @@ The second argument is an array of group names this type belongs to. After regis
 ```javascript
 PortTypes.define('audio', []);
 ```
+
+### Dynamic Output Types (resolveOutputType)
+
+If a node's output type depends on what is connected to its inputs, define a `resolveOutputType(inputTypes)` function in the node definition. The graph engine calls this whenever input connections change and updates the output port type, color, and connection line colors automatically.
+
+```javascript
+NodeRegistry.register('my_polymorphic', {
+    label: 'Polymorphic',
+    category: 'Math',
+
+    ports: [
+        { name: 'a', dir: 'in', type: 'addable', label: 'A', defaultValue: 0 },
+        { name: 'out', dir: 'out', type: 'addable', label: 'Result' }
+    ],
+
+    resolveOutputType(inputTypes) {
+        if (inputTypes.length === 0) return 'addable';
+        if (inputTypes.some(t => t === 'string')) return 'string';
+        return 'numeric';
+    },
+
+    // ...
+});
+```
+
+When the resolved output type changes, any downstream flow connections that become incompatible with the new type are automatically removed.
 
 ### Helpers in render()
 

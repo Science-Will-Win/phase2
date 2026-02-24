@@ -65,7 +65,7 @@ Each node is composed of the following parts:
 **Node Attributes:**
 
 - `dataOnly` -- The node is a pure data supplier and is not included in the execution plan. It only provides values to other nodes via connections.
-- `sideEffect` -- The node produces a visible side effect (display, save) rather than just passing data through.
+- `result` -- The node produces a visible result (display, save) rather than just passing data through.
 - `allowRef` -- The node can receive reference connections. Only LLM-using nodes (Step, Composite, and all Tool nodes) have this flag. Nodes without it will reject reference connections and their ports will be dimmed during a ref drag.
 
 #### General Nodes
@@ -76,10 +76,10 @@ Each node is composed of the following parts:
 |------|-------|-------------|
 | **Step** | In(`any`) -> Out(`any`) | The fundamental execution unit. Configurable title, tool, and description. Shows a progress bar during execution. |
 | **Composite** | Image(`image`) + Prompt(`string`) -> Out(`any`) | Combines an image and a text prompt for multimodal inference via a vision encoder. Image nodes must flow-connect through this node (direct Image-to-Step flow connections are not allowed). |
-| **Visualize** | In(`any`) -> Out(`any`) | Displays images, charts, or visual results inline within the node body. `sideEffect`. |
-| **Observe** | In(`any`) only | Terminal node that displays intermediate text results. Has no output port, so it cannot pass data further down the pipeline. `sideEffect`. |
-| **Save** | In(`any`) only | Saves the incoming data to a file. Supports filename templates with dynamic tags such as `{date}`, `{time}`, `{uuid}`, `{node-title}`, etc. `sideEffect`. |
-| **Table** | In(`any`) -> Out(`any`) | Renders incoming data as a table. `sideEffect`. |
+| **Visualize** | In(`any`) -> Out(`any`) | Displays images, charts, or visual results inline within the node body. `result`. |
+| **Observe** | In(`any`) only | Terminal node that displays intermediate text results. Has no output port, so it cannot pass data further down the pipeline. `result`. |
+| **Save** | In(`any`) only | Saves the incoming data to a file. Supports filename templates with dynamic tags such as `{date}`, `{time}`, `{uuid}`, `{node-title}`, etc. `result`. |
+| **Table** | In(`table`) -> Out(`table`) | Renders incoming data as a table. Accepts `data` and `table` inputs. `result`. |
 
 #### Input Nodes
 
@@ -102,16 +102,12 @@ Each node is composed of the following parts:
 
 #### Data Nodes
 
-<img src="img/nodes-data.png" alt="Data category nodes" width="480">
-
 | Node | Ports | Description |
 |------|-------|-------------|
 | **Data Loader** | Out(`data`) | Loads an external file via drag-and-drop or file picker. Shows filename and size. `dataOnly`. |
 | **Image** | Out(`image`) | Loads an image file and shows a thumbnail preview. The `image` port type restricts flow connections to only `image`-compatible inputs (i.e. the Composite node). Reference connections to any node are still allowed. `dataOnly`. |
 
 #### Tool Nodes
-
-<img src="img/nodes-tool.png" alt="Tool category nodes" width="680">
 
 All Tool nodes share the same port layout: In(`any`) -> Out(`any`). Each node is pre-configured with a specific tool identifier.
 
@@ -130,7 +126,7 @@ All Tool nodes share the same port layout: In(`any`) -> Out(`any`). Each node is
 
 | Node | Ports | Description |
 |------|-------|-------------|
-| **Add** | A(`addable`) + B(`addable`) -> Out(`numeric`) | Addition / string concatenation: A + B |
+| **Add** | A(`addable`) + B(`addable`) -> Out(dynamic) | Addition / string concatenation: A + B. Output type resolves dynamically -- `numeric` when all inputs are numeric, `string` when any input is string, `addable` by default. |
 | **Subtract** | A(`numeric`) + B(`numeric`) -> Out(`numeric`) | Subtraction: A - B |
 | **Multiply** | A(`numeric`) + B(`numeric`) -> Out(`numeric`) | Multiplication: A * B |
 | **Divide** | A(`numeric`) + B(`numeric`) -> Out(`numeric`) | Division: A / B |
@@ -139,6 +135,8 @@ All Tool nodes share the same port layout: In(`any`) -> Out(`any`). Each node is
 | **Log** | In(`numeric`) -> Out(`numeric`) | Natural logarithm |
 
 All Math nodes accept inline default values in their input fields when no connection is attached. The `numeric` group type accepts `float`, `int`, `double`, `matrix`, `vector2/3/4`, and `color` outputs. The `addable` group (used by Add) additionally accepts `string` for concatenation.
+
+**Dynamic Output Types:** The Add node uses `resolveOutputType` to determine its output type based on connected inputs. When all inputs are `numeric` types, the output resolves to `numeric`. When any input is `string`, the output resolves to `string`. When no inputs are connected, the default output type is `addable`. Incompatible downstream connections are automatically removed when the output type changes.
 
 #### Broadcasting Rules
 
@@ -177,7 +175,7 @@ Drag from an output port to an input port to create a connection.
 
 **Reference Connections** are a secondary connection type used to attach supplementary data to a node without being part of the main execution chain. For example, a Step node might reference a Data Loader node to access a dataset during its execution, even though the Data Loader is not the previous step in the pipeline. Reference connections are shown as dashed lines to visually distinguish them from the primary flow.
 
-To create a reference connection, right-click drag from a port instead of left-click dragging. Unlike flow connections, reference connections bypass port type restrictions. However, only nodes with `allowRef: true` can receive reference connections -- these are the LLM-using nodes: Step, Composite, and all Tool nodes (Analyze, CodeGen, PubMed, NCBI Gene, CRISPR, Protocol). Input, Data, Math, and sideEffect nodes do not accept reference connections and their ports will be dimmed during a ref drag. This makes it possible to attach an Image node to a Step node via reference even though a direct flow connection is not allowed.
+To create a reference connection, right-click drag from a port instead of left-click dragging. Unlike flow connections, reference connections bypass port type restrictions. However, only nodes with `allowRef: true` can receive reference connections -- these are the LLM-using nodes: Step, Composite, and all Tool nodes (Analyze, CodeGen, PubMed, NCBI Gene, CRISPR, Protocol). Input, Data, Math, and result nodes do not accept reference connections and their ports will be dimmed during a ref drag. This makes it possible to attach an Image node to a Step node via reference even though a direct flow connection is not allowed.
 
 <img src="img/reference-connection.png" alt="Reference connection example" width="480">
 
@@ -191,7 +189,8 @@ During a flow connection drag, compatible ports are highlighted and incompatible
 - `addable` (group) accepts everything `numeric` does, plus `string`
 - `string` inputs accept any output type
 - `float` inputs also accept `int` outputs
-- `boolean`, `data` are standalone types (not in any group)
+- `table` inputs accept `table` and `data` outputs
+- `boolean`, `data`, `table` are standalone types (not in any group)
 - Reference connections bypass type restrictions but only on `allowRef: true` nodes (Step, Composite, Tool nodes)
 
 <img src="img/port-compatibility.png" alt="Port compatibility highlighting" width="680">
@@ -289,8 +288,6 @@ Please prepare the following images in the `inference_ui/img/` folder:
 | `reference-connection.png` | Screenshot showing a dashed reference connection between two nodes alongside a solid flow connection, so both types are visible for comparison |
 | `nodes-general.png` | All General category nodes side by side: Step, Composite, Visualize, Observe, Save, Table |
 | `nodes-input.png` | All Input category nodes side by side: String, Integer, Float, Double, Boolean, Vector2, Vector3, Vector4, Color, Matrix2, Matrix3, Matrix4 |
-| `nodes-data.png` | Data category nodes side by side: Data Loader (with a file loaded) and Image (with a thumbnail preview) |
-| `nodes-tool.png` | All Tool category nodes side by side: Analyze Plan, Code Gen, PubMed Search, NCBI Gene, CRISPR Designer, Protocol Builder |
 | `nodes-math.png` | All 7 Math category nodes side by side: Add, Subtract, Multiply, Divide, Power, Sqrt, Log, showing the inline default value inputs |
 
 ## Adding Custom Nodes

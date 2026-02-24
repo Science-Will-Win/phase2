@@ -5,7 +5,7 @@
 NodeRegistry.register('observe', {
     label: 'Observe',
     category: 'General',
-    sideEffect: true,
+    result: true,
 
     ports: [
         { name: 'in', dir: 'in', type: 'any' }

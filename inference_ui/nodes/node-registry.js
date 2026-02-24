@@ -41,6 +41,7 @@ const PortTypes = {
             return false;
         }
 
+        if (inType === 'table') return outType === 'table' || outType === 'data';
         if (inType === 'string') return true;
         if (inType === 'float' && outType === 'int') return true;
         return outType === inType;
@@ -61,6 +62,7 @@ PortTypes.define('vector4', ['numeric', 'addable']);
 PortTypes.define('color',   ['numeric', 'addable']);
 PortTypes.define('boolean', []);
 PortTypes.define('data',    []);
+PortTypes.define('table',   []);
 PortTypes.define('image',   []);
 
 // ============================================

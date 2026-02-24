@@ -77,14 +77,92 @@ class NodeGraph {
         const node = this.nodes.get(nodeId);
         if (!node) return [];
         const nodeDef = NodeRegistry.get(node.type);
-        return nodeDef?.ports || [
+        let ports = nodeDef?.ports || [
             { name: 'in', dir: 'in', type: 'any' },
             { name: 'out', dir: 'out', type: 'any' }
         ];
+        if (node._resolvedOutType) {
+            ports = ports.map(p =>
+                p.dir === 'out' && p.name === 'out'
+                    ? { ...p, type: node._resolvedOutType }
+                    : p
+            );
+        }
+        return ports;
     }
 
     _isTypeCompatible(outType, inType) {
         return PortTypes.isCompatible(outType, inType);
+    }
+
+    _resolveOutputTypes(nodeId, visited) {
+        if (!visited) visited = new Set();
+        if (visited.has(nodeId)) return;
+        visited.add(nodeId);
+
+        const node = this.nodes.get(nodeId);
+        if (!node) return;
+        const def = NodeRegistry.get(node.type);
+        if (!def?.resolveOutputType) return;
+
+        const inputTypes = [];
+        for (const conn of this.connections.values()) {
+            if (conn.to === nodeId && conn.type === 'flow') {
+                const fromPorts = this._getPortsForNode(conn.from);
+                const fromPortDef = fromPorts.find(p => p.name === conn.fromPort);
+                if (fromPortDef) inputTypes.push(fromPortDef.type);
+            }
+        }
+
+        const newOutType = def.resolveOutputType(inputTypes);
+        const oldOutType = node._resolvedOutType;
+        node._resolvedOutType = newOutType;
+
+        const outPortEl = this.canvas.querySelector(
+            `.ng-port-out[data-node-id="${nodeId}"][data-port-name="out"]`
+        );
+        if (outPortEl) outPortEl.setAttribute('data-port-type', newOutType);
+
+        if (oldOutType !== newOutType) {
+            const toRemove = [];
+            for (const [connId, conn] of this.connections) {
+                if (conn.from !== nodeId || conn.type !== 'flow') continue;
+                const toPorts = this._getPortsForNode(conn.to);
+                const toPortDef = toPorts.find(p => p.name === conn.toPort);
+                if (toPortDef && !this._isTypeCompatible(newOutType, toPortDef.type)) {
+                    toRemove.push(connId);
+                }
+            }
+            for (const connId of toRemove) this.removeConnection(connId);
+
+            for (const conn of this.connections.values()) {
+                if (conn.from === nodeId) {
+                    const visPaths = this.svg.querySelectorAll(
+                        `.ng-connection[data-conn-id="${conn.id}"]`
+                    );
+                    visPaths.forEach(vp => {
+                        vp.className.baseVal.split(' ')
+                            .filter(c => c.startsWith('ng-conn-type-'))
+                            .forEach(c => vp.classList.remove(c));
+                        if (newOutType !== 'any') {
+                            vp.classList.add(`ng-conn-type-${newOutType}`);
+                        }
+                    });
+                }
+            }
+
+            for (const conn of this.connections.values()) {
+                if (conn.from === nodeId && conn.type === 'flow') {
+                    this._resolveOutputTypes(conn.to, visited);
+                }
+            }
+        }
+    }
+
+    _resolveAllOutputTypes() {
+        for (const nodeId of this.nodes.keys()) {
+            this._resolveOutputTypes(nodeId);
+        }
     }
 
     _allowsRef(nodeId) {
@@ -813,6 +891,7 @@ class NodeGraph {
         this._renderConnection(conn);
         if (type === 'flow') {
             this._hideDefaultField(toNodeId, toPort);
+            this._resolveOutputTypes(toNodeId);
         }
         return id;
     }
@@ -828,6 +907,7 @@ class NodeGraph {
             if (!stillFlowConnected) {
                 this._showDefaultField(conn.to, conn.toPort);
             }
+            this._resolveOutputTypes(conn.to);
         }
     }
 
@@ -1514,6 +1594,7 @@ class NodeGraph {
             const toPort = c.toPort || 'in';
             this.addConnection(c.from, fromPort, c.to, toPort, c.type || 'flow');
         }
+        this._resolveAllOutputTypes();
     }
 
     // ---- Graph -> Execution Plan ----
@@ -1539,7 +1620,7 @@ class NodeGraph {
     toExecutionPlan(options = {}) {
         if (this.nodes.size === 0) return null;
 
-        const { excludeSideEffect = false } = options;
+        const { excludeResult = false } = options;
         const { children, parents, connectedIds } = this._buildGraphMaps();
 
         const candidateIds = new Set();
@@ -1547,7 +1628,7 @@ class NodeGraph {
             if (!connectedIds.has(node.id)) continue;
             const def = NodeRegistry.get(node.type);
             if (def?.dataOnly) continue;
-            if (excludeSideEffect && def?.sideEffect) continue;
+            if (excludeResult && def?.result) continue;
             candidateIds.add(node.id);
         }
 
@@ -1652,7 +1733,7 @@ class NodeGraph {
     }
 
     getExecutionPlanHash() {
-        const plan = this.toExecutionPlan({ excludeSideEffect: true });
+        const plan = this.toExecutionPlan({ excludeResult: true });
         if (!plan || !plan.steps || plan.steps.length === 0) return null;
         return plan.steps.map(s => `${s.id}:${s.tool}:${s.name}`).join('|');
     }
