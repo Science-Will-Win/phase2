@@ -13,7 +13,7 @@
     "prompt": "Given the case description, identify the MOST relevant CRISPR delivery method from the options below:\n\na. Plasmid Transfection\nb. Lentivirus/Retrovirus\nc. RNP/mRNA electroporation\nd. RNP/mRNA microinjection\ne. mRNA LNP\nf. AAV\n\nCategory: Primary cell\nCase Description: I hope to edit primary CD4+ T cells\n\nPlease provide your response as follows:\n- Most relevant method (select one letter a-f): ",
     "task_name": "crispr_delivery",
     "split": "train",
-    "answer": "b"
+    "answer": "c"
   },
   {
     "instance_id": 2,
@@ -53,7 +53,7 @@
     "prompt": "Given the case description, identify the MOST relevant CRISPR delivery method from the options below:\n\na. Plasmid Transfection\nb. Lentivirus/Retrovirus\nc. RNP/mRNA electroporation\nd. RNP/mRNA microinjection\ne. mRNA LNP\nf. AAV\n\nCategory: Primary cell\nCase Description: I hope to edit primary CD8+ T cells\n\nPlease provide your response as follows:\n- Most relevant method (select one letter a-f): ",
     "task_name": "crispr_delivery",
     "split": "train",
-    "answer": "b"
+    "answer": "c"
   },
   {
     "instance_id": 7,
@@ -109,7 +109,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: microfibrillar-associated protein 2 levels\nGenes in locus: {C1RL},{MFAP5},{C1R},{A2ML1}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "C1RL"
+    "answer": "MFAP5"
   },
   {
     "instance_id": 14,
@@ -125,7 +125,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: hemoglobin a1c levels\nGenes in locus: {G6PC2},{SPC25},{GPR155},{ABCB11}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "SPC25"
+    "answer": "G6PC2"
   },
   {
     "instance_id": 16,
@@ -133,7 +133,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: creatinine levels\nGenes in locus: {RNF186-AS1},{KLHDC7A},{RNF186}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "RNF186-AS1"
+    "answer": "KLHDC7A"
   },
   {
     "instance_id": 17,
@@ -141,7 +141,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: reticulocyte count\nGenes in locus: {C11orf58},{SOX6},{PLEKHA7},{PDE3B}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "PDE3B"
+    "answer": "SOX6"
   },
   {
     "instance_id": 18,
@@ -157,7 +157,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: mean reticulocyte volume\nGenes in locus: {BLVRB},{SERTAD3},{C19orf47}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "BLVRB"
+    "answer": "SERTAD3"
   },
   {
     "instance_id": 20,
@@ -205,7 +205,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: cholesteryl esters in medium hdl (ukb data field 23569)\nGenes in locus: {LDLR},{ANGPTL4},{DOCK6}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "LDLR"
+    "answer": "ANGPTL4"
   },
   {
     "instance_id": 26,
@@ -237,7 +237,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: sex hormone-binding globulin levels\nGenes in locus: {NFIA},{DNAI4},{ATG4C}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "ATG4C"
+    "answer": "NFIA"
   },
   {
     "instance_id": 30,
@@ -245,7 +245,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: chronic obstructive pulmonary disease liability (machine learning-based score)\nGenes in locus: {NPNT},{H2AZ1-DT},{DDIT4L}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "DDIT4L"
+    "answer": "NPNT"
   },
   {
     "instance_id": 31,
@@ -261,7 +261,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: cop9 signalosome complex subunit 7b levels\nGenes in locus: {APOC4},{APOC1P1},{APOC4-APOC2}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "APOC4-APOC2"
+    "answer": "APOC4"
   },
   {
     "instance_id": 33,
@@ -413,7 +413,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: mean corpuscular volume\nGenes in locus: {SPRY3},{TMLHE},{MPP1},{G6PD}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "G6PD"
+    "answer": "SPRY3"
   },
   {
     "instance_id": 52,
@@ -445,7 +445,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: concentration of small vldl particles\nGenes in locus: {LDLR},{ANGPTL4},{KANK3},{SMARCA4}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "ANGPTL4"
+    "answer": "LDLR"
   },
   {
     "instance_id": 56,
@@ -485,7 +485,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: phospholipids in small vldl\nGenes in locus: {LDLR},{ANGPTL4},{SMARCA4}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "ANGPTL4"
+    "answer": "LDLR"
   },
   {
     "instance_id": 61,
@@ -541,7 +541,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: platelet distribution width\nGenes in locus: {MICALL1},{PLA2G6},{RAC2}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "MICALL1"
+    "answer": "RAC2"
   },
   {
     "instance_id": 68,
@@ -549,7 +549,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: waist-to-hip ratio adjusted for bmi (additive genetic model)\nGenes in locus: {ABCB9},{DNAH10},{CCDC92}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "CCDC92"
+    "answer": "ABCB9"
   },
   {
     "instance_id": 69,
@@ -605,7 +605,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: serum levels of protein b4galt6\nGenes in locus: {DSG1-AS1},{DSG1},{B4GALT6},{RNF138}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "DSG1-AS1"
+    "answer": "B4GALT6"
   },
   {
     "instance_id": 76,
@@ -621,7 +621,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: mean corpuscular volume\nGenes in locus: {ABO},{ARF4P1},{BRD3},{WDR5-DT}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "ABO"
+    "answer": "BRD3"
   },
   {
     "instance_id": 78,
@@ -629,7 +629,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: platelet count\nGenes in locus: {RALGDS},{ABO},{VAV2},{BRD3OS},{BRD3}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "ABO"
+    "answer": "BRD3OS"
   },
   {
     "instance_id": 79,
@@ -661,7 +661,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: telomere length\nGenes in locus: {STMN3},{MHENCR},{RTEL1-TNFRSF6B},{RTEL1}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "RTEL1-TNFRSF6B"
+    "answer": "RTEL1"
   },
   {
     "instance_id": 83,
@@ -693,7 +693,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: brown vs. black hair color\nGenes in locus: {HERC2},{OCA2},{HERC2P1}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "OCA2"
+    "answer": "HERC2"
   },
   {
     "instance_id": 87,
@@ -741,7 +741,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: medication use (calcium channel blockers)\nGenes in locus: {ATXN2},{SH2B3},{ALDH2}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "ALDH2"
+    "answer": "ATXN2"
   },
   {
     "instance_id": 93,
@@ -757,7 +757,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: mean platelet volume\nGenes in locus: {REST},{SPINK2},{LRRC66}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "REST"
+    "answer": "LRRC66"
   },
   {
     "instance_id": 95,
@@ -765,7 +765,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: cutaneous mastocytosis\nGenes in locus: {HBG2},{OR51Q1},{OR51B5},{HBE1}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "HBG2"
+    "answer": "OR51Q1"
   },
   {
     "instance_id": 96,
@@ -797,7 +797,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: phospholipids to total lipids ratio in small ldl\nGenes in locus: {LDLR},{ANGPTL4},{KANK2},{DOCK6}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "ANGPTL4"
+    "answer": "LDLR"
   },
   {
     "instance_id": 100,
@@ -853,7 +853,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: x-17325 levels\nGenes in locus: {FAAH},{UQCRH},{NSUN4}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "FAAH"
+    "answer": "NSUN4"
   },
   {
     "instance_id": 107,
@@ -877,7 +877,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: smoking initiation\nGenes in locus: {PDE11A},{PDE11A-AS1},{RNU5E-9P},{OSBPL6}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "PDE11A-AS1"
+    "answer": "PDE11A"
   },
   {
     "instance_id": 110,
@@ -893,7 +893,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: adult body size\nGenes in locus: {PATJ},{LEPR},{PDE4B}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "PATJ"
+    "answer": "LEPR"
   },
   {
     "instance_id": 112,
@@ -909,7 +909,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: body size at age 10\nGenes in locus: {PATJ},{SLC35D1},{LEPR},{PDE4B}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "PATJ"
+    "answer": "LEPR"
   },
   {
     "instance_id": 114,
@@ -965,7 +965,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: phosphatidylinositol_36:2_[m+h]1+ levels\nGenes in locus: {TMC4},{CNOT3},{PRPF31},{MBOAT7}",
     "task_name": "gwas_causal_gene_gwas_catalog",
     "split": "train",
-    "answer": "TMC4"
+    "answer": "MBOAT7"
   },
   {
     "instance_id": 121,
@@ -2304,14 +2304,6 @@
     "answer": "ACE"
   },
   {
-    "instance_id": 288,
-    "task_instance_id": 11,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Dermatitis\nGenes in locus: {ATP6V1E1P3},{SAAL1},{CYP3A4},{ADNP},{MIR7976},{WDR82P1}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CYP3A4"
-  },
-  {
     "instance_id": 289,
     "task_instance_id": 12,
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Hypertension\nGenes in locus: {SH3GL2},{REN},{SMG1P2},{MRPL4},{CYCSP17},{DDX11L8}",
@@ -2326,14 +2318,6 @@
     "task_name": "gwas_causal_gene_pharmaprojects",
     "split": "train",
     "answer": "XDH"
-  },
-  {
-    "instance_id": 291,
-    "task_instance_id": 14,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Bronchitis\nGenes in locus: {MRPS21P7},{CYP3A4},{PAFAH1B1P1},{OTOS},{TUBA4A},{MIR6825}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CYP3A4"
   },
   {
     "instance_id": 292,
@@ -2384,14 +2368,6 @@
     "answer": "CALM1"
   },
   {
-    "instance_id": 298,
-    "task_instance_id": 21,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Influenza, Human\nGenes in locus: {TYRO3},{ZNF135},{CYP3A4},{OOSP1P1},{QRSL1P1},{FZD8}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CYP3A4"
-  },
-  {
     "instance_id": 299,
     "task_instance_id": 22,
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Diarrhea\nGenes in locus: {RPS6P4},{MIR320D1},{AKT1},{LSMEM1},{CRYBG1},{TPSG1}",
@@ -2406,14 +2382,6 @@
     "task_name": "gwas_causal_gene_pharmaprojects",
     "split": "train",
     "answer": "ATP1A1"
-  },
-  {
-    "instance_id": 301,
-    "task_instance_id": 24,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Malaria\nGenes in locus: {Y_RNA},{LINC01834},{RAB40AL},{TMED11P},{CYP2B6},{MIR7114}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CYP2B6"
   },
   {
     "instance_id": 302,
@@ -2648,14 +2616,6 @@
     "answer": "ACHE"
   },
   {
-    "instance_id": 331,
-    "task_instance_id": 54,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Pharyngitis\nGenes in locus: {HOXA6},{KRT18P25},{ITLN2},{LINC01888},{CEP162},{CYP3A4}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CYP3A4"
-  },
-  {
     "instance_id": 332,
     "task_instance_id": 55,
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Peptic Ulcer\nGenes in locus: {MBD6},{HPS4},{CHRM1},{RN7SKP266},{EIF4A1P11},{RPL17P12}",
@@ -2678,14 +2638,6 @@
     "task_name": "gwas_causal_gene_pharmaprojects",
     "split": "train",
     "answer": "GABRA1"
-  },
-  {
-    "instance_id": 335,
-    "task_instance_id": 58,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: HIV Infections\nGenes in locus: {SNED1},{H3P12},{CTSLP4},{DGCR8},{SALL4},{CYP3A4}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CYP3A4"
   },
   {
     "instance_id": 336,
@@ -2758,14 +2710,6 @@
     "task_name": "gwas_causal_gene_pharmaprojects",
     "split": "train",
     "answer": "BCL2"
-  },
-  {
-    "instance_id": 345,
-    "task_instance_id": 68,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Rhinitis, Allergic\nGenes in locus: {TTC1},{ZNF446},{CTXN1},{PTGER4},{COL6A2},{CYP3A4}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CYP3A4"
   },
   {
     "instance_id": 346,
@@ -2944,14 +2888,6 @@
     "answer": "ACHE"
   },
   {
-    "instance_id": 368,
-    "task_instance_id": 91,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Tuberculosis\nGenes in locus: {GAK},{CYP1A2},{KLRB1},{SNRPA},{NPR2},{LINC01689}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CYP1A2"
-  },
-  {
     "instance_id": 369,
     "task_instance_id": 92,
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Peptic Ulcer\nGenes in locus: {NAGS},{H3-3B},{SHCBP1L},{GNA14-AS1},{TAS2R31},{CHRM3}",
@@ -2989,7 +2925,7 @@
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Diarrhea\nGenes in locus: {Metazoa_SRP},{FAM169A},{POLR3H},{SMU1},{GUCA2A},{CTPS1}",
     "task_name": "gwas_causal_gene_pharmaprojects",
     "split": "train",
-    "answer": "CTPS1"
+    "answer": "GUCA2A"
   },
   {
     "instance_id": 374,
@@ -3288,14 +3224,6 @@
     "answer": "NR1I2"
   },
   {
-    "instance_id": 411,
-    "task_instance_id": 134,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Tuberculosis\nGenes in locus: {PDZD2},{CERS6},{POLA1},{KBTBD3},{DEFB108A},{CYP2C8}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CYP2C8"
-  },
-  {
     "instance_id": 412,
     "task_instance_id": 135,
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: HIV Infections\nGenes in locus: {MIR7849},{ELF2},{RPL10AP3},{NR1I2},{MTHFD1L},{ENTPD5}",
@@ -3398,14 +3326,6 @@
     "task_name": "gwas_causal_gene_pharmaprojects",
     "split": "train",
     "answer": "FOXM1"
-  },
-  {
-    "instance_id": 425,
-    "task_instance_id": 148,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Breast Neoplasms\nGenes in locus: {APAF1},{CCT6A},{LCE7A},{CYP2B6},{ZNF521},{SREK1IP1}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CYP2B6"
   },
   {
     "instance_id": 426,
@@ -3726,14 +3646,6 @@
     "task_name": "gwas_causal_gene_pharmaprojects",
     "split": "train",
     "answer": "CCND1"
-  },
-  {
-    "instance_id": 466,
-    "task_instance_id": 189,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Chordoma\nGenes in locus: {EIF4A2P4},{RPS29P15},{PDCL3P2},{PTPN13},{SLC12A3},{SEMA7A}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "SLC12A3"
   },
   {
     "instance_id": 467,
@@ -4088,14 +4000,6 @@
     "answer": "CACNA1A"
   },
   {
-    "instance_id": 511,
-    "task_instance_id": 234,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Alcohol problem\nGenes in locus: {DDR2},{HLA-DPA1},{LRP10},{UBE2J1},{DPEP2},{SLC16A8}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "DDR2"
-  },
-  {
     "instance_id": 512,
     "task_instance_id": 235,
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Fine Tremor\nGenes in locus: {A1CF},{ACHE},{SMC6},{SLC26A7},{NBPF11},{RN7SKP59}",
@@ -4416,14 +4320,6 @@
     "answer": "AASS"
   },
   {
-    "instance_id": 552,
-    "task_instance_id": 275,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Germinoma\nGenes in locus: {SLC12A3},{AHCYP7},{DEFB130B},{PABPC1L},{CTBP2},{MIR3918}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "SLC12A3"
-  },
-  {
     "instance_id": 553,
     "task_instance_id": 276,
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Insulin Sensitivity\nGenes in locus: {AVL9},{H2AC3P},{MIF4GD},{RPS3},{SMIM31},{PTPN1}",
@@ -4512,20 +4408,12 @@
     "answer": "AR"
   },
   {
-    "instance_id": 564,
-    "task_instance_id": 287,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Anemia\nGenes in locus: {WDHD1},{SPATC1L},{CYP39A1},{CYP8B1},{CACNA2D3},{PRR34}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "CACNA2D3"
-  },
-  {
     "instance_id": 565,
     "task_instance_id": 288,
     "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Neurofibrosarcoma\nGenes in locus: {MUC5AC},{CTRL},{PTCH1},{CHCHD3P1},{DLG3},{G6PD}",
     "task_name": "gwas_causal_gene_pharmaprojects",
     "split": "train",
-    "answer": "G6PD"
+    "answer": "PTCH1"
   },
   {
     "instance_id": 566,
@@ -4550,14 +4438,6 @@
     "task_name": "gwas_causal_gene_pharmaprojects",
     "split": "train",
     "answer": "CREB1"
-  },
-  {
-    "instance_id": 569,
-    "task_instance_id": 292,
-    "prompt": "Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). \nIdentify the causal gene.\nGWAS phenotype: Sandhoff Disease\nGenes in locus: {CHD1},{ZNF267},{FGFR3},{N4BP1},{RNFT1},{APP}",
-    "task_name": "gwas_causal_gene_pharmaprojects",
-    "split": "train",
-    "answer": "APP"
   },
   {
     "instance_id": 570,

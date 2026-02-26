@@ -26,7 +26,7 @@ Category: Primary cell
 Case Description: I hope to edit primary CD4+ T cells
 
 Please provide your response as follows:
-- Most relevant method (select one letter a-f): ",crispr_delivery,train,b
+- Most relevant method (select one letter a-f): ",crispr_delivery,train,c
 2,2,"Given the case description, identify the MOST relevant CRISPR delivery method from the options below:
 
 a. Plasmid Transfection
@@ -96,7 +96,7 @@ Category: Primary cell
 Case Description: I hope to edit primary CD8+ T cells
 
 Please provide your response as follows:
-- Most relevant method (select one letter a-f): ",crispr_delivery,train,b
+- Most relevant method (select one letter a-f): ",crispr_delivery,train,c
 7,7,"Given the case description, identify the MOST relevant CRISPR delivery method from the options below:
 
 a. Plasmid Transfection
@@ -144,7 +144,7 @@ Genes in locus: {NR2C2AP},{NCAN},{TM6SF2}",gwas_causal_gene_gwas_catalog,train,T
 13,4,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: microfibrillar-associated protein 2 levels
-Genes in locus: {C1RL},{MFAP5},{C1R},{A2ML1}",gwas_causal_gene_gwas_catalog,train,C1RL
+Genes in locus: {C1RL},{MFAP5},{C1R},{A2ML1}",gwas_causal_gene_gwas_catalog,train,MFAP5
 14,5,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: phospholipid levels in very large vldl
@@ -152,15 +152,15 @@ Genes in locus: {NR2C2AP},{NCAN},{TM6SF2}",gwas_causal_gene_gwas_catalog,train,T
 15,6,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: hemoglobin a1c levels
-Genes in locus: {G6PC2},{SPC25},{GPR155},{ABCB11}",gwas_causal_gene_gwas_catalog,train,SPC25
+Genes in locus: {G6PC2},{SPC25},{GPR155},{ABCB11}",gwas_causal_gene_gwas_catalog,train,G6PC2
 16,7,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: creatinine levels
-Genes in locus: {RNF186-AS1},{KLHDC7A},{RNF186}",gwas_causal_gene_gwas_catalog,train,RNF186-AS1
+Genes in locus: {RNF186-AS1},{KLHDC7A},{RNF186}",gwas_causal_gene_gwas_catalog,train,KLHDC7A
 17,8,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: reticulocyte count
-Genes in locus: {C11orf58},{SOX6},{PLEKHA7},{PDE3B}",gwas_causal_gene_gwas_catalog,train,PDE3B
+Genes in locus: {C11orf58},{SOX6},{PLEKHA7},{PDE3B}",gwas_causal_gene_gwas_catalog,train,SOX6
 18,9,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: cholesteryl esters to total lipids ratio in large hdl
@@ -168,7 +168,7 @@ Genes in locus: {RN7SL309P},{KAT5},{PLCB3}",gwas_causal_gene_gwas_catalog,train,
 19,10,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: mean reticulocyte volume
-Genes in locus: {BLVRB},{SERTAD3},{C19orf47}",gwas_causal_gene_gwas_catalog,train,BLVRB
+Genes in locus: {BLVRB},{SERTAD3},{C19orf47}",gwas_causal_gene_gwas_catalog,train,SERTAD3
 20,11,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: body mass index (mtag)
@@ -192,7 +192,7 @@ Genes in locus: {FLRT1},{MACROD1},{PLCB3}",gwas_causal_gene_gwas_catalog,train,P
 25,16,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: cholesteryl esters in medium hdl (ukb data field 23569)
-Genes in locus: {LDLR},{ANGPTL4},{DOCK6}",gwas_causal_gene_gwas_catalog,train,LDLR
+Genes in locus: {LDLR},{ANGPTL4},{DOCK6}",gwas_causal_gene_gwas_catalog,train,ANGPTL4
 26,17,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: diastolic blood pressure
@@ -208,11 +208,11 @@ Genes in locus: {UBE2V1P6},{ABCB11},{DHRS9}",gwas_causal_gene_gwas_catalog,train
 29,20,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: sex hormone-binding globulin levels
-Genes in locus: {NFIA},{DNAI4},{ATG4C}",gwas_causal_gene_gwas_catalog,train,ATG4C
+Genes in locus: {NFIA},{DNAI4},{ATG4C}",gwas_causal_gene_gwas_catalog,train,NFIA
 30,21,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: chronic obstructive pulmonary disease liability (machine learning-based score)
-Genes in locus: {NPNT},{H2AZ1-DT},{DDIT4L}",gwas_causal_gene_gwas_catalog,train,DDIT4L
+Genes in locus: {NPNT},{H2AZ1-DT},{DDIT4L}",gwas_causal_gene_gwas_catalog,train,NPNT
 31,22,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: logical memory (immediate recall) in normal cognition
@@ -220,7 +220,7 @@ Genes in locus: {COMMD5},{ZNF7},{ZNF16},{ZNF250}",gwas_causal_gene_gwas_catalog,
 32,23,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: cop9 signalosome complex subunit 7b levels
-Genes in locus: {APOC4},{APOC1P1},{APOC4-APOC2}",gwas_causal_gene_gwas_catalog,train,APOC4-APOC2
+Genes in locus: {APOC4},{APOC1P1},{APOC4-APOC2}",gwas_causal_gene_gwas_catalog,train,APOC4
 33,24,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: c-c motif chemokine 8 levels
@@ -296,7 +296,7 @@ Genes in locus: {APOC1},{APOE},{APOC1P1}",gwas_causal_gene_gwas_catalog,train,AP
 51,42,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: mean corpuscular volume
-Genes in locus: {SPRY3},{TMLHE},{MPP1},{G6PD}",gwas_causal_gene_gwas_catalog,train,G6PD
+Genes in locus: {SPRY3},{TMLHE},{MPP1},{G6PD}",gwas_causal_gene_gwas_catalog,train,SPRY3
 52,43,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: ldl cholesterol levels x short total sleep time interaction (2df test)
@@ -312,7 +312,7 @@ Genes in locus: {LINC02009},{CDCP1},{CCRL2},{SLC6A20}",gwas_causal_gene_gwas_cat
 55,46,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: concentration of small vldl particles
-Genes in locus: {LDLR},{ANGPTL4},{KANK3},{SMARCA4}",gwas_causal_gene_gwas_catalog,train,ANGPTL4
+Genes in locus: {LDLR},{ANGPTL4},{KANK3},{SMARCA4}",gwas_causal_gene_gwas_catalog,train,LDLR
 56,47,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: alkaline phosphatase, placental type levels
@@ -332,7 +332,7 @@ Genes in locus: {SLC22A16},{DDO},{CDK19}",gwas_causal_gene_gwas_catalog,train,SL
 60,51,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: phospholipids in small vldl
-Genes in locus: {LDLR},{ANGPTL4},{SMARCA4}",gwas_causal_gene_gwas_catalog,train,ANGPTL4
+Genes in locus: {LDLR},{ANGPTL4},{SMARCA4}",gwas_causal_gene_gwas_catalog,train,LDLR
 61,52,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: phospholipid levels in large vldl
@@ -360,11 +360,11 @@ Genes in locus: {KRT8P10},{RNU6-1122P},{NCKAP1},{FRZB}",gwas_causal_gene_gwas_ca
 67,58,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: platelet distribution width
-Genes in locus: {MICALL1},{PLA2G6},{RAC2}",gwas_causal_gene_gwas_catalog,train,MICALL1
+Genes in locus: {MICALL1},{PLA2G6},{RAC2}",gwas_causal_gene_gwas_catalog,train,RAC2
 68,59,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: waist-to-hip ratio adjusted for bmi (additive genetic model)
-Genes in locus: {ABCB9},{DNAH10},{CCDC92}",gwas_causal_gene_gwas_catalog,train,CCDC92
+Genes in locus: {ABCB9},{DNAH10},{CCDC92}",gwas_causal_gene_gwas_catalog,train,ABCB9
 69,60,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: cholesteryl ester levels in medium hdl
@@ -392,7 +392,7 @@ Genes in locus: {ABCF3},{PSMD2},{FAM131A}",gwas_causal_gene_gwas_catalog,train,P
 75,66,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: serum levels of protein b4galt6
-Genes in locus: {DSG1-AS1},{DSG1},{B4GALT6},{RNF138}",gwas_causal_gene_gwas_catalog,train,DSG1-AS1
+Genes in locus: {DSG1-AS1},{DSG1},{B4GALT6},{RNF138}",gwas_causal_gene_gwas_catalog,train,B4GALT6
 76,67,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: low fluorescent percentage of reticulocytes
@@ -400,11 +400,11 @@ Genes in locus: {MARCHF8},{ZNF22},{DUXAP4}",gwas_causal_gene_gwas_catalog,train,
 77,68,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: mean corpuscular volume
-Genes in locus: {ABO},{ARF4P1},{BRD3},{WDR5-DT}",gwas_causal_gene_gwas_catalog,train,ABO
+Genes in locus: {ABO},{ARF4P1},{BRD3},{WDR5-DT}",gwas_causal_gene_gwas_catalog,train,BRD3
 78,69,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: platelet count
-Genes in locus: {RALGDS},{ABO},{VAV2},{BRD3OS},{BRD3}",gwas_causal_gene_gwas_catalog,train,ABO
+Genes in locus: {RALGDS},{ABO},{VAV2},{BRD3OS},{BRD3}",gwas_causal_gene_gwas_catalog,train,BRD3OS
 79,70,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: total lipid levels in medium hdl
@@ -420,7 +420,7 @@ Genes in locus: {ADAMTS17},{IGF1R},{CHSY1},{IRAIN}",gwas_causal_gene_gwas_catalo
 82,73,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: telomere length
-Genes in locus: {STMN3},{MHENCR},{RTEL1-TNFRSF6B},{RTEL1}",gwas_causal_gene_gwas_catalog,train,RTEL1-TNFRSF6B
+Genes in locus: {STMN3},{MHENCR},{RTEL1-TNFRSF6B},{RTEL1}",gwas_causal_gene_gwas_catalog,train,RTEL1
 83,74,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: diastolic blood pressure
@@ -436,7 +436,7 @@ Genes in locus: {ADAM10},{LIPC},{ALDH1A2}",gwas_causal_gene_gwas_catalog,train,L
 86,77,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: brown vs. black hair color
-Genes in locus: {HERC2},{OCA2},{HERC2P1}",gwas_causal_gene_gwas_catalog,train,OCA2
+Genes in locus: {HERC2},{OCA2},{HERC2P1}",gwas_causal_gene_gwas_catalog,train,HERC2
 87,78,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: triglyceride levels in idl
@@ -460,7 +460,7 @@ Genes in locus: {MARK4},{APOE},{EXOC3L2}",gwas_causal_gene_gwas_catalog,train,AP
 92,83,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: medication use (calcium channel blockers)
-Genes in locus: {ATXN2},{SH2B3},{ALDH2}",gwas_causal_gene_gwas_catalog,train,ALDH2
+Genes in locus: {ATXN2},{SH2B3},{ALDH2}",gwas_causal_gene_gwas_catalog,train,ATXN2
 93,84,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: average diameter for hdl particles
@@ -468,11 +468,11 @@ Genes in locus: {RN7SL140P},{APOB},{RPS16P2}",gwas_causal_gene_gwas_catalog,trai
 94,85,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: mean platelet volume
-Genes in locus: {REST},{SPINK2},{LRRC66}",gwas_causal_gene_gwas_catalog,train,REST
+Genes in locus: {REST},{SPINK2},{LRRC66}",gwas_causal_gene_gwas_catalog,train,LRRC66
 95,86,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: cutaneous mastocytosis
-Genes in locus: {HBG2},{OR51Q1},{OR51B5},{HBE1}",gwas_causal_gene_gwas_catalog,train,HBG2
+Genes in locus: {HBG2},{OR51Q1},{OR51B5},{HBE1}",gwas_causal_gene_gwas_catalog,train,OR51Q1
 96,87,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: circulating docosahexaenoic acid levels
@@ -488,7 +488,7 @@ Genes in locus: {ACACB},{CUX2},{CORO1C},{FOXN4}",gwas_causal_gene_gwas_catalog,t
 99,90,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: phospholipids to total lipids ratio in small ldl
-Genes in locus: {LDLR},{ANGPTL4},{KANK2},{DOCK6}",gwas_causal_gene_gwas_catalog,train,ANGPTL4
+Genes in locus: {LDLR},{ANGPTL4},{KANK2},{DOCK6}",gwas_causal_gene_gwas_catalog,train,LDLR
 100,91,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: aspartate aminotransferase to alanine aminotransferase ratio
@@ -516,7 +516,7 @@ Genes in locus: {APOE},{APOC4},{APOC1P1}",gwas_causal_gene_gwas_catalog,train,AP
 106,97,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: x-17325 levels
-Genes in locus: {FAAH},{UQCRH},{NSUN4}",gwas_causal_gene_gwas_catalog,train,FAAH
+Genes in locus: {FAAH},{UQCRH},{NSUN4}",gwas_causal_gene_gwas_catalog,train,NSUN4
 107,98,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: sex hormone-binding globulin levels adjusted for bmi
@@ -528,7 +528,7 @@ Genes in locus: {MORN1},{SKI},{PRDM16}",gwas_causal_gene_gwas_catalog,train,PRDM
 109,100,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: smoking initiation
-Genes in locus: {PDE11A},{PDE11A-AS1},{RNU5E-9P},{OSBPL6}",gwas_causal_gene_gwas_catalog,train,PDE11A-AS1
+Genes in locus: {PDE11A},{PDE11A-AS1},{RNU5E-9P},{OSBPL6}",gwas_causal_gene_gwas_catalog,train,PDE11A
 110,101,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: telomere length
@@ -536,7 +536,7 @@ Genes in locus: {STUM},{PARP1},{CDKN2AIPNLP1}",gwas_causal_gene_gwas_catalog,tra
 111,102,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: adult body size
-Genes in locus: {PATJ},{LEPR},{PDE4B}",gwas_causal_gene_gwas_catalog,train,PATJ
+Genes in locus: {PATJ},{LEPR},{PDE4B}",gwas_causal_gene_gwas_catalog,train,LEPR
 112,103,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: sum basophil neutrophil counts
@@ -544,7 +544,7 @@ Genes in locus: {GCKR},{ITSN2},{NCOA1}",gwas_causal_gene_gwas_catalog,train,GCKR
 113,104,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: body size at age 10
-Genes in locus: {PATJ},{SLC35D1},{LEPR},{PDE4B}",gwas_causal_gene_gwas_catalog,train,PATJ
+Genes in locus: {PATJ},{SLC35D1},{LEPR},{PDE4B}",gwas_causal_gene_gwas_catalog,train,LEPR
 114,105,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: sex hormone-binding globulin levels
@@ -572,7 +572,7 @@ Genes in locus: {PATJ},{LINC01739},{PDE4B}",gwas_causal_gene_gwas_catalog,train,
 120,111,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: phosphatidylinositol_36:2_[m+h]1+ levels
-Genes in locus: {TMC4},{CNOT3},{PRPF31},{MBOAT7}",gwas_causal_gene_gwas_catalog,train,TMC4
+Genes in locus: {TMC4},{CNOT3},{PRPF31},{MBOAT7}",gwas_causal_gene_gwas_catalog,train,MBOAT7
 121,112,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: serum uric acid levels
@@ -1241,10 +1241,6 @@ Genes in locus: {CHRNA1},{OR5AR1},{Y_RNA},{ERHP2},{KCTD5P1},{Metazoa_SRP}",gwas_
 Identify the causal gene.
 GWAS phenotype: Hypertension
 Genes in locus: {U3},{LILRA1},{PPEF1-AS1},{TOPBP1},{ACE},{GH2}",gwas_causal_gene_pharmaprojects,train,ACE
-288,11,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Dermatitis
-Genes in locus: {ATP6V1E1P3},{SAAL1},{CYP3A4},{ADNP},{MIR7976},{WDR82P1}",gwas_causal_gene_pharmaprojects,train,CYP3A4
 289,12,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Hypertension
@@ -1253,10 +1249,6 @@ Genes in locus: {SH3GL2},{REN},{SMG1P2},{MRPL4},{CYCSP17},{DDX11L8}",gwas_causal
 Identify the causal gene.
 GWAS phenotype: Gout
 Genes in locus: {XDH},{OR5G1P},{ABCB1},{AZU1},{PHKG2},{MYO1B-AS1}",gwas_causal_gene_pharmaprojects,train,XDH
-291,14,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Bronchitis
-Genes in locus: {MRPS21P7},{CYP3A4},{PAFAH1B1P1},{OTOS},{TUBA4A},{MIR6825}",gwas_causal_gene_pharmaprojects,train,CYP3A4
 292,15,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Dermatitis
@@ -1281,10 +1273,6 @@ Genes in locus: {ACOX3},{F10},{RNU6-1148P},{RERGL},{RNU6-254P},{RNU6ATAC28P}",gw
 Identify the causal gene.
 GWAS phenotype: Arrhythmias, Cardiac
 Genes in locus: {GSG1},{CALM1},{MAPK10},{MYPN},{AFG2B},{IGHEP1}",gwas_causal_gene_pharmaprojects,train,CALM1
-298,21,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Influenza, Human
-Genes in locus: {TYRO3},{ZNF135},{CYP3A4},{OOSP1P1},{QRSL1P1},{FZD8}",gwas_causal_gene_pharmaprojects,train,CYP3A4
 299,22,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Diarrhea
@@ -1293,10 +1281,6 @@ Genes in locus: {RPS6P4},{MIR320D1},{AKT1},{LSMEM1},{CRYBG1},{TPSG1}",gwas_causa
 Identify the causal gene.
 GWAS phenotype: Malaria
 Genes in locus: {CCDC28A},{RPL7P32},{ATP1A1},{RBBP4P7},{CSF3R},{RNU6-1287P}",gwas_causal_gene_pharmaprojects,train,ATP1A1
-301,24,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Malaria
-Genes in locus: {Y_RNA},{LINC01834},{RAB40AL},{TMED11P},{CYP2B6},{MIR7114}",gwas_causal_gene_pharmaprojects,train,CYP2B6
 302,25,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Headache
@@ -1413,10 +1397,6 @@ Genes in locus: {AEN},{LINC02526},{HRH2},{Y_RNA},{NPY6R},{LINC00345}",gwas_causa
 Identify the causal gene.
 GWAS phenotype: Stroke
 Genes in locus: {Y_RNA},{TXNDC15},{HTR2A},{ACHE},{HDAC9},{U3}",gwas_causal_gene_pharmaprojects,train,ACHE
-331,54,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Pharyngitis
-Genes in locus: {HOXA6},{KRT18P25},{ITLN2},{LINC01888},{CEP162},{CYP3A4}",gwas_causal_gene_pharmaprojects,train,CYP3A4
 332,55,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Peptic Ulcer
@@ -1429,10 +1409,6 @@ Genes in locus: {PRAMEF6},{LPL},{ZNF93},{GPR171},{SULT2A1},{SNORD27}",gwas_causa
 Identify the causal gene.
 GWAS phenotype: Parkinson Disease
 Genes in locus: {MIR1304},{GABRA1},{MTSS1},{ART5},{IGIP},{ME2}",gwas_causal_gene_pharmaprojects,train,GABRA1
-335,58,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: HIV Infections
-Genes in locus: {SNED1},{H3P12},{CTSLP4},{DGCR8},{SALL4},{CYP3A4}",gwas_causal_gene_pharmaprojects,train,CYP3A4
 336,59,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Gout
@@ -1469,10 +1445,6 @@ Genes in locus: {ZSCAN12P1},{CCNT2P1},{MYLIP},{CKBP1},{HRH1},{MYL12BP2}",gwas_ca
 Identify the causal gene.
 GWAS phenotype: Breast Neoplasms
 Genes in locus: {CLCC1},{BCL2},{CD37},{CISD1P1},{FAM110B},{PGLYRP1}",gwas_causal_gene_pharmaprojects,train,BCL2
-345,68,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Rhinitis, Allergic
-Genes in locus: {TTC1},{ZNF446},{CTXN1},{PTGER4},{COL6A2},{CYP3A4}",gwas_causal_gene_pharmaprojects,train,CYP3A4
 346,69,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Stroke
@@ -1561,10 +1533,6 @@ Genes in locus: {Y_RNA},{RNF225},{ZNF630},{PDE4A},{TRGV9},{LINC00842}",gwas_caus
 Identify the causal gene.
 GWAS phenotype: Glaucoma
 Genes in locus: {CDH9},{RNA5SP223},{SLC12A5-AS1},{ACHE},{SAR1AP2},{HYI}",gwas_causal_gene_pharmaprojects,train,ACHE
-368,91,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Tuberculosis
-Genes in locus: {GAK},{CYP1A2},{KLRB1},{SNRPA},{NPR2},{LINC01689}",gwas_causal_gene_pharmaprojects,train,CYP1A2
 369,92,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Peptic Ulcer
@@ -1584,7 +1552,7 @@ Genes in locus: {WDR33},{RPS26P47},{CARS},{VN1R7P},{SKA1},{MRPS34}",gwas_causal_
 373,96,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Diarrhea
-Genes in locus: {Metazoa_SRP},{FAM169A},{POLR3H},{SMU1},{GUCA2A},{CTPS1}",gwas_causal_gene_pharmaprojects,train,CTPS1
+Genes in locus: {Metazoa_SRP},{FAM169A},{POLR3H},{SMU1},{GUCA2A},{CTPS1}",gwas_causal_gene_pharmaprojects,train,GUCA2A
 374,97,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Hypertension
@@ -1733,10 +1701,6 @@ Genes in locus: {DIO3OS},{P4HB},{BMP4},{FMNL1-AS1},{CCDC69},{RPL7P50}",gwas_caus
 Identify the causal gene.
 GWAS phenotype: Tuberculosis
 Genes in locus: {NR1I2},{RN7SKP188},{QTRT2},{TRPM8},{RPL23AP4},{LIN28A}",gwas_causal_gene_pharmaprojects,train,NR1I2
-411,134,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Tuberculosis
-Genes in locus: {PDZD2},{CERS6},{POLA1},{KBTBD3},{DEFB108A},{CYP2C8}",gwas_causal_gene_pharmaprojects,train,CYP2C8
 412,135,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: HIV Infections
@@ -1789,10 +1753,6 @@ Genes in locus: {MYBPC1},{EZR-AS1},{USP51},{RPS2P45},{SNORD116-14},{CTSA}",gwas_
 Identify the causal gene.
 GWAS phenotype: Mastitis
 Genes in locus: {RPS4XP5},{OTOGL},{MIR891A},{DUX4L10},{OR2B11},{FOXM1}",gwas_causal_gene_pharmaprojects,train,FOXM1
-425,148,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Breast Neoplasms
-Genes in locus: {APAF1},{CCT6A},{LCE7A},{CYP2B6},{ZNF521},{SREK1IP1}",gwas_causal_gene_pharmaprojects,train,CYP2B6
 426,149,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Seizures
@@ -1953,10 +1913,6 @@ Genes in locus: {CPT1A},{LYRM7},{MAGEA3},{SRIP3},{GAREM2},{MND1}",gwas_causal_ge
 Identify the causal gene.
 GWAS phenotype: Heart Neoplasm
 Genes in locus: {ZSWIM4},{MIR3116-1},{OR2T11},{LAT},{CCND1},{FLJ30679}",gwas_causal_gene_pharmaprojects,train,CCND1
-466,189,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Chordoma
-Genes in locus: {EIF4A2P4},{RPS29P15},{PDCL3P2},{PTPN13},{SLC12A3},{SEMA7A}",gwas_causal_gene_pharmaprojects,train,SLC12A3
 467,190,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Hyperphagia
@@ -2133,10 +2089,6 @@ Genes in locus: {PLSCR2},{CA12},{LINC01991},{PLAU},{MED1},{RN7SL270P}",gwas_caus
 Identify the causal gene.
 GWAS phenotype: Hemiplegia, Crossed
 Genes in locus: {OR4A17P},{TH},{RPL7P27},{CACNA1A},{LETMD1},{ZP4}",gwas_causal_gene_pharmaprojects,train,CACNA1A
-511,234,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Alcohol problem
-Genes in locus: {DDR2},{HLA-DPA1},{LRP10},{UBE2J1},{DPEP2},{SLC16A8}",gwas_causal_gene_pharmaprojects,train,DDR2
 512,235,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Fine Tremor
@@ -2297,10 +2249,6 @@ Genes in locus: {CRYGS},{APOA5},{SAR1AP1},{KCNC4},{ZMAT2},{AR}",gwas_causal_gene
 Identify the causal gene.
 GWAS phenotype: Lens dislocation
 Genes in locus: {MIR4712},{LRRC51},{CANT1},{IRS4},{LINC02490},{AASS}",gwas_causal_gene_pharmaprojects,train,AASS
-552,275,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Germinoma
-Genes in locus: {SLC12A3},{AHCYP7},{DEFB130B},{PABPC1L},{CTBP2},{MIR3918}",gwas_causal_gene_pharmaprojects,train,SLC12A3
 553,276,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Insulin Sensitivity
@@ -2345,14 +2293,10 @@ Genes in locus: {CBX1},{VDR},{FAAH2},{C1DP5},{OR5E1P},{SMCR8}",gwas_causal_gene_
 Identify the causal gene.
 GWAS phenotype: Reifenstein Syndrome
 Genes in locus: {SRSF3P2},{MIR26A2},{DAO},{BRWD1P3},{PCBP3},{AR}",gwas_causal_gene_pharmaprojects,train,AR
-564,287,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Anemia
-Genes in locus: {WDHD1},{SPATC1L},{CYP39A1},{CYP8B1},{CACNA2D3},{PRR34}",gwas_causal_gene_pharmaprojects,train,CACNA2D3
 565,288,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Neurofibrosarcoma
-Genes in locus: {MUC5AC},{CTRL},{PTCH1},{CHCHD3P1},{DLG3},{G6PD}",gwas_causal_gene_pharmaprojects,train,G6PD
+Genes in locus: {MUC5AC},{CTRL},{PTCH1},{CHCHD3P1},{DLG3},{G6PD}",gwas_causal_gene_pharmaprojects,train,PTCH1
 566,289,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Visceral Pain
@@ -2365,10 +2309,6 @@ Genes in locus: {HIVEP3},{PANK3},{GAMT},{UBA2},{NUTM2D},{SNORD86}",gwas_causal_g
 Identify the causal gene.
 GWAS phenotype: Morphine Abuse
 Genes in locus: {ACRBP},{CREB1},{SMPX},{LNPPS},{RFXANK},{ERVMER34-1}",gwas_causal_gene_pharmaprojects,train,CREB1
-569,292,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
-Identify the causal gene.
-GWAS phenotype: Sandhoff Disease
-Genes in locus: {CHD1},{ZNF267},{FGFR3},{N4BP1},{RNFT1},{APP}",gwas_causal_gene_pharmaprojects,train,APP
 570,293,"Your task is to identify likely causal genes within a locus for a given GWAS phenotype. From the list, provide only the likely causal gene (matching one of the given genes). 
 Identify the causal gene.
 GWAS phenotype: Porencephaly
