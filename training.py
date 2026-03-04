@@ -28,7 +28,7 @@ def run_training(args):
     import model as model_module
     from tokenizer import TokenizerManager
     import loss as loss_module
-    import dataset as dataset_module
+    import data_loaders as dataset_module
     from training_logger import TrainingLogger, CSVLoggingCallback, EvalAccuracyCallback, EpochSummaryCallback
     from utils import get_file_config, get_token_config
     from utils.paths import set_local_mode, get_model_dir, get_result_dir
@@ -539,6 +539,10 @@ if __name__ == "__main__":
                         help="Learning rate for optimizer. Default: 2e-5")
     parser.add_argument("--data_path", type=str, default=None,
                         help="Path to training data JSON file (required)")
+    parser.add_argument("--dataset_type", type=str, required=True,
+                        help="Dataset module name or path (e.g. 'instruction_dataset', 'agent_dataset'). "
+                             "Must match a .py file in data_loaders/ or be a file path. "
+                             "The .py extension is optional.")
     
     # Validation & Early Stopping Arguments
     parser.add_argument("--val_ratio", type=float, default=0.3,

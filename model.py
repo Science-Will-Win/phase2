@@ -40,6 +40,18 @@ MODEL_CONFIGS = {
         "rms_norm_eps": 1e-5,
         "tie_word_embeddings": True,
     },
+    "ministral_3_3b_reasoning_agent": {
+        "hidden_size": 3072,
+        "num_hidden_layers": 26,
+        "num_attention_heads": 32,
+        "num_key_value_heads": 8,
+        "intermediate_size": 9216,
+        "vocab_size": 131072,
+        "max_position_embeddings": 262144,
+        "rope_theta": 1000000.0,
+        "rms_norm_eps": 1e-5,
+        "tie_word_embeddings": True,
+    },
 }
 
 def download_and_setup_model(model_type, dest_dir=None):
@@ -75,7 +87,15 @@ def download_and_setup_model(model_type, dest_dir=None):
             print(f"[DEBUG] Failed to download model: {e}")
             return
 
-    # Tokenizer is in the model directory, so no extra setup needed.
+    # Apply tokenizer patches if the architecture defines them
+    if hasattr(file_config, 'TOKENIZER_PATCHES'):
+        import tokenizer_patch
+        tokenizer_patch.apply_if_needed(
+            model_dir,
+            file_config.TOKENIZER_PATCHES,
+            getattr(file_config, 'PATCH_VERSION', 1),
+        )
+
     print(f"[DEBUG] Model and tokenizer ready in {model_dir}")
 
 def add_model_args(parser: argparse.ArgumentParser):
