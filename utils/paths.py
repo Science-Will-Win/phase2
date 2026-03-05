@@ -71,3 +71,10 @@ def ensure_dirs():
     """Create required directories if they don't exist"""
     for key in ["model", "data", "result", "log", "temp_data"]:
         os.makedirs(get_path(key), exist_ok=True)
+
+
+def reload_config():
+    """Force reload config.yaml (needed after writes)"""
+    global _config
+    _config = None
+    return load_config()

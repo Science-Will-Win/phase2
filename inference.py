@@ -541,6 +541,12 @@ def find_model_path(model_name, base_dir=None):
         if os.path.exists(path3) and has_model_files(path3):
             return path3
     
+    # 4. Not found locally — try auto-download from HuggingFace Hub
+    from utils.model_download import auto_download_model
+    result = auto_download_model(model_name, base_dir, has_model_files_fn=has_model_files)
+    if result:
+        return result
+    
     return None
 
 
