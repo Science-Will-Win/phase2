@@ -4,6 +4,7 @@ Based on mistralai/Ministral-3-3B-Reasoning-2512 architecture
 """
 
 import math
+from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -768,6 +769,20 @@ class Mistral3TextModel(PreTrainedModel):
 
 
 # ============================================================================
+# Heteroscedastic Output (log_variance 포함)
+# ============================================================================
+
+@dataclass
+class HeteroscedasticCausalLMOutput(CausalLMOutputWithPast):
+    """
+    Output class for heteroscedastic models.
+    Extends CausalLMOutputWithPast with log_variance field for learned uncertainty.
+    log_variance shape: (batch, seq_len, 1)
+    """
+    log_variance: Optional[torch.FloatTensor] = None
+
+
+# ============================================================================
 # Main Vision-Language Model
 # ============================================================================
 
@@ -792,11 +807,19 @@ class Mistral3ForConditionalGeneration(PreTrainedModel, GenerationMixin):
         self.multi_modal_projector = Mistral3MultiModalProjector(config)
         self.model = Mistral3TextModel(config.text_config)
         self.lm_head = nn.Linear(config.text_config.hidden_size, config.text_config.vocab_size, bias=False)
-        
+
+        # Heteroscedastic log_variance head: outputs log(σ²) per token position
+        self.log_variance_head = nn.Linear(config.text_config.hidden_size, 1, bias=True)
+
         self.image_token_index = config.image_token_index
         self.spatial_merge_size = config.spatial_merge_size
-        
+
         self.post_init()
+
+        # Zero init AFTER post_init() — post_init() calls _init_weights() which
+        # would overwrite our zeros. σ = exp(0/2) = 1 (stable start)
+        nn.init.zeros_(self.log_variance_head.weight)
+        nn.init.zeros_(self.log_variance_head.bias)
 
     def get_input_embeddings(self):
         return self.model.embed_tokens
@@ -861,8 +884,8 @@ class Mistral3ForConditionalGeneration(PreTrainedModel, GenerationMixin):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, CausalLMOutputWithPast]:
-        
+    ) -> Union[Tuple, HeteroscedasticCausalLMOutput]:
+
         return_dict = return_dict if return_dict is not None else True
 
         # Get text embeddings
@@ -873,7 +896,7 @@ class Mistral3ForConditionalGeneration(PreTrainedModel, GenerationMixin):
         if pixel_values is not None:
             image_features = self.vision_tower(pixel_values)
             image_features = self.multi_modal_projector(image_features)
-            
+
             # Merge text and image embeddings
             inputs_embeds = self._merge_input_ids_with_image_features(
                 input_ids, inputs_embeds, image_features
@@ -895,22 +918,22 @@ class Mistral3ForConditionalGeneration(PreTrainedModel, GenerationMixin):
         hidden_states = outputs[0]
         logits = self.lm_head(hidden_states)
 
+        # Heteroscedastic log_variance: log(σ²) per token
+        # σ = exp(log_variance / 2), used by heteroscedastic_uncertainty loss
+        log_variance = self.log_variance_head(hidden_states)  # (batch, seq_len, 1)
+
+        # Loss는 외부 loss handler에서 처리 (heteroscedastic_uncertainty_loss)
+        # 내부에서 계산하면 이중 계산됨
         loss = None
-        if labels is not None:
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            loss_fct = nn.CrossEntropyLoss()
-            shift_logits = shift_logits.view(-1, self.config.vocab_size)
-            shift_labels = shift_labels.view(-1)
-            loss = loss_fct(shift_logits, shift_labels)
 
         if not return_dict:
-            output = (logits,) + outputs[1:]
+            output = (logits, log_variance) + outputs[1:]
             return ((loss,) + output) if loss is not None else output
 
-        return CausalLMOutputWithPast(
+        return HeteroscedasticCausalLMOutput(
             loss=loss,
             logits=logits,
+            log_variance=log_variance,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
