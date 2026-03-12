@@ -8,8 +8,10 @@ from training_logger import LossResult
 from architectures.ministral_3_3b_instruct import Ministral3TokenConfig
 
 # Import for Monte Carlo uncertainty computation
-from heteroscedastic_utils import compute_heteroscedastic_log_probs
-
+from heteroscedastic_utils import (
+    compute_heteroscedastic_log_probs,
+    compute_learned_heteroscedastic_log_probs 
+)
 
 # =============================================================================
 # GDPO Base Class - Common functionality for all GDPO variants
@@ -1617,34 +1619,47 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         outputs, logits, shift_logits, shift_labels, token_log_probs, valid_mask = \
             self.compute_log_probs(model, sequences, input_len)
         
-        # 4. Compute uncertainty (reasoning-only by default, full sequence if configured)
-        if self.uncertainty_full_sequence:
-            # Full sequence uncertainty
-            prob_correct, uncertainty_scores = self.compute_uncertainty(
-                shift_logits, shift_labels, valid_mask
-            )
-        else:
-            # Reasoning-only uncertainty (default)
-            reasoning_mask = self.get_reasoning_mask(sequences)
-            prob_correct, uncertainty_scores = self.compute_uncertainty(
-                shift_logits, shift_labels, valid_mask, reasoning_mask
-            )
+        if not hasattr(outputs, 'log_variance') or outputs.log_variance is None:
+            raise ValueError("Model outputs must include 'log_variance' for heteroscedastic loss.")
+        shift_log_var=outputs.log_variance[..., :-1, :].contiguous()  # Align with shift_logits
         
-        # 5. Reasoning judge
+        variance = torch.exp(shift_log_var.squeeze(-1))  # 학습된 불확실성 수치화
+
+        reasoning_mask = self.get_reasoning_mask(sequences)
+        if not self.uncertainty_full_sequence:
+            shifted_reasoning_mask = reasoning_mask[:, 1:]
+            combined_mask= valid_mask * shifted_reasoning_mask
+        else:
+            combined_mask = valid_mask
+        
+        eps=1e-8 #평균 분산 계산 ㄱㄱㄱ
+        seq_variance = (variance * combined_mask).sum(dim=1) / (combined_mask.sum(dim=1) + eps)
+
         has_judge = self.enable_reasoning_judge
-        rq_scores = self.judge_rollout_reasoning(sequences, input_ids, expanded_refs) if has_judge else None
-        
-        # 6. Determine num_objectives
-        has_tool_reward = self.enable_tool_reward
-        if has_tool_reward:
-            n = 6  # Format, Length, Tool Format, Accuracy, Uncertainty, Tool Correctness
-        else:
-            n = 4  # Format, Length, Accuracy, Uncertainty
+        rq_scores = None
+
         if has_judge:
-            n += 1
-        if temp_rewards is not None:
-            n += 1
-        
+            rq_scores = torch.zeros(sequences.shape[0], dtype=torch.float32, device=model.device) 
+            certain_mask = seq_variance <= self.uncertainty_threshold
+            certain_indices = certain_mask.nonzero(as_tuple=True)[0]
+            
+            if len (certain_indices) > 0:
+                certain_seqs = sequences[certain_indices]
+                certain_input_ids = input_ids[certain_indices % B]
+                certain_refs=None
+                if expanded_refs:
+                    certain_refs=[expanded_refs[i.item()] for i in certain_indices]
+
+                partial_rq_scores=self.judge_rollout_reasoning(certain_seqs, certain_input_ids, certain_refs)
+                rq_scores[certain_indices] = partial_rq_scores.to(model.device)
+
+        T = self.gdpo_config.get("heteroscedastic_T", 3)
+        prob_correct_log, _ = compute_learned_heteroscedastic_log_probs(
+            shift_logits, shift_log_var, shift_labels, T=T, sequential=False)
+        prob_correct = torch.exp(prob_correct_log.clamp(max=0))
+        prob_correct_per_sample = (prob_correct * combined_mask).sum(dim=1) / (combined_mask.sum(dim=1) + eps)
+        uncertainty_scores = 1 - prob_correct_per_sample
+
         # 7. Compute rewards
         reward_config = self.build_reward_config()
         reward_config["uncertainty_threshold"] = self.uncertainty_threshold
