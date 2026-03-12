@@ -326,70 +326,32 @@ class GDPOBase:
         return kl_per_sample
     
     def prepare_references(
-        self,
-        inputs: Dict[str, torch.Tensor],
+        self, 
+        inputs: Dict[str, torch.Tensor], 
         effective_G: int
     ) -> Optional[List[str]]:
         """
         Prepare expanded references for reward calculation.
-
-        Priority:
-        1. Ref model generation (if self.ref_model is not None) — greedy decode
-        2. Labels-based decode (기존 방식, SFT 데이터용)
-
+        
         Args:
-            inputs: Input dict containing 'input_ids', 'attention_mask', optional 'labels'
+            inputs: Input dict containing optional 'labels'
             effective_G: Effective group size (G or 2G)
-
+        
         Returns:
             expanded_refs: List of reference strings expanded to match batch size, or None
         """
-        # Priority 1: Ref model 생성 (GDPO post-training용)
-        if self.ref_model is not None and "input_ids" in inputs:
-            input_ids = inputs["input_ids"]
-            attention_mask = inputs.get(
-                "attention_mask",
-                (input_ids != self.tokenizer.pad_token_id).long()
-            )
-
-            with torch.no_grad():
-                ref_sequences = self.ref_model.generate(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    max_new_tokens=self.max_new_tokens,
-                    do_sample=False,  # greedy for deterministic reference
-                    pad_token_id=self.tokenizer.pad_token_id,
-                )
-
-            # Decode generated part only (prompt 부분 제외)
-            prompt_len = input_ids.shape[1]
-            ref_new_tokens = ref_sequences[:, prompt_len:]
-            references = self.tokenizer.batch_decode(
-                ref_new_tokens, skip_special_tokens=False
-            )
-
-            if self.debug:
-                print(f"[DEBUG] Ref model generated {len(references)} references")
-                if references:
-                    print(f"[DEBUG] Ref[0] (first 100 chars): {references[0][:100]}")
-
-            expanded_refs = []
-            for ref in references:
-                expanded_refs.extend([ref] * effective_G)
-            return expanded_refs
-
-        # Priority 2: Labels 기반 (기존 SFT 데이터 방식)
+        expanded_refs = None
+        
         if "labels" in inputs:
             valid_labels = inputs["labels"].clone()
             valid_labels[valid_labels == -100] = self.tokenizer.pad_token_id
             references = self.tokenizer.batch_decode(valid_labels, skip_special_tokens=True)
-
+            
             expanded_refs = []
             for ref in references:
                 expanded_refs.extend([ref] * effective_G)
-            return expanded_refs
-
-        return None
+        
+        return expanded_refs
     
     def prepare_gt_tool_calls(
         self, 
@@ -630,8 +592,8 @@ class GDPOBase:
         think_start = token_config.THINK_START or "[THINK]"
         think_end = token_config.THINK_END or "[/THINK]"
         
-        texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
-
+        texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=True)
+        
         B = input_ids.shape[0]
         questions_raw = self.tokenizer.batch_decode(input_ids, skip_special_tokens=True)
         effective_G = len(texts) // B
@@ -932,8 +894,8 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
         num_objectives += 1
     
     batch_size = sequences.shape[0]
-    texts = tokenizer.batch_decode(sequences, skip_special_tokens=False)
-
+    texts = tokenizer.batch_decode(sequences, skip_special_tokens=True)
+    
     rewards = torch.zeros(batch_size, num_objectives)
     
     # Set token config defaults
@@ -1051,23 +1013,20 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
             failed_level = 3
         
         # Apply hierarchical zeroing
-        if failed_level == 1:
-            # Tool Correctness 실패: acc, medium, easy 전부 zero
+        if failed_level >= 1:
             acc_score = 0.0
             uncertainty_reward = 0.0
             reasoning_quality_reward = 0.0
             format_score = 0.0
             length_score = 0.0
             tool_format_score = 0.0
-        elif failed_level == 2:
-            # Accuracy 실패: medium, easy zero
+        elif failed_level >= 2:
             uncertainty_reward = 0.0
             reasoning_quality_reward = 0.0
             format_score = 0.0
             length_score = 0.0
             tool_format_score = 0.0
-        elif failed_level == 3:
-            # Medium 실패: easy만 zero
+        elif failed_level >= 3:
             format_score = 0.0
             length_score = 0.0
             tool_format_score = 0.0
@@ -1617,34 +1576,75 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         outputs, logits, shift_logits, shift_labels, token_log_probs, valid_mask = \
             self.compute_log_probs(model, sequences, input_len)
         
-        # 4. Compute uncertainty (reasoning-only by default, full sequence if configured)
-        if self.uncertainty_full_sequence:
-            # Full sequence uncertainty
-            prob_correct, uncertainty_scores = self.compute_uncertainty(
-                shift_logits, shift_labels, valid_mask
-            )
-        else:
-            # Reasoning-only uncertainty (default)
-            reasoning_mask = self.get_reasoning_mask(sequences)
-            prob_correct, uncertainty_scores = self.compute_uncertainty(
-                shift_logits, shift_labels, valid_mask, reasoning_mask
-            )
+        if not hasattr(outputs, 'log_variance') or outputs.log_variance is None:
+            raise ValueError("Model outputs must include 'log_variance' for heteroscedastic loss.")
+        shift_log_var=outputs.log_variance[..., :-1:, :].contiguous()  # Align with shift_logits
         
-        # 5. Reasoning judge
+        variance = torch.exp(shift_log_var.squeeze(-1))  # 학습된 불확실성 수치화
+
+        reasoning_mask = self.get_reasoning_mask(sequences)
+        if not self.uncertainty_full_sequence:
+            shifted_reasoning_mask = reasoning_mask[:, 1:]
+            combined_mask= valid_mask * shifted_reasoning_mask
+        else:
+            combined_mask = valid_mask
+        
+        eps=1e-8 #평균 분산 계산 ㄱㄱㄱ
+        seq_variance = (variance * combined_mask).sum(dim=1) / (combined_mask.sum(dim=1) + eps)
+
         has_judge = self.enable_reasoning_judge
-        rq_scores = self.judge_rollout_reasoning(sequences, input_ids, expanded_refs) if has_judge else None
-        
-        # 6. Determine num_objectives
-        has_tool_reward = self.enable_tool_reward
-        if has_tool_reward:
-            n = 6  # Format, Length, Tool Format, Accuracy, Uncertainty, Tool Correctness
-        else:
-            n = 4  # Format, Length, Accuracy, Uncertainty
+        rq_scores = None
+
         if has_judge:
-            n += 1
-        if temp_rewards is not None:
-            n += 1
+            rq_scores = torch.zeros(sequences.shape[0], dtype=torch.float32, device=model.device) 
+            certain_mask = seq_variance <= self.uncertainty_threshold
+            certain_indices = certain_mask.nonzero(as_tuple=True)[0]
+            
+            if len (certain_indices) > 0:
+                certain_seqs = sequences[certain_indices]
+                certain_input_ids = input_ids[certain_indices % B]
+                certain_refs=None
+                if expanded_refs:
+                    certain_refs=[expanded_refs[i] for i in certain_indices]
+
+                partial_rq_scores=self.judge_rollout_reasoning(certain_seqs, certain_input_ids, certain_refs)
+                rq_scores[certain_indices] = partial_rq_scores.to(model.device)
+
+        T = self.gdpo_config.get("heteroscedastic_T", 3)
+        prob_correct_log, _ = compute_heteroscedastic_log_probs(
+            shift_logits, shift_log_var, shift_labels, T=T, sequential=False)
+        prob_correct = torch.exp(prob_correct_log.clamp(max=0))
+        prob_correct_per_sample = (prob_correct * combined_mask).sum(dim=1) / (combined_mask.sum(dim=1) + eps)
+        uncertainty_scores = 1 - prob_correct_per_sample
+      
+        # # 4. Compute uncertainty (reasoning-only by default, full sequence if configured)
+        # if self.uncertainty_full_sequence:
+        #     # Full sequence uncertainty
+        #     prob_correct, uncertainty_scores = self.compute_uncertainty(
+        #         shift_logits, shift_labels, valid_mask
+        #     )
+        # else:
+        #     # Reasoning-only uncertainty (default)
+        #     reasoning_mask = self.get_reasoning_mask(sequences)
+        #     prob_correct, uncertainty_scores = self.compute_uncertainty(
+        #         shift_logits, shift_labels, valid_mask, reasoning_mask
+        #     )
         
+        # # 5. Reasoning judge
+        # has_judge = self.enable_reasoning_judge
+        # rq_scores = self.judge_rollout_reasoning(sequences, input_ids, expanded_refs) if has_judge else None
+        
+        # # 6. Determine num_objectives
+        # has_tool_reward = self.enable_tool_reward
+        # if has_tool_reward:
+        #     n = 6  # Format, Length, Tool Format, Accuracy, Uncertainty, Tool Correctness
+        # else:
+        #     n = 4  # Format, Length, Accuracy, Uncertainty
+        # if has_judge:
+        #     n += 1
+        # if temp_rewards is not None:
+        #     n += 1
+
         # 7. Compute rewards
         reward_config = self.build_reward_config()
         reward_config["uncertainty_threshold"] = self.uncertainty_threshold
