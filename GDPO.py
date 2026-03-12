@@ -8,8 +8,10 @@ from training_logger import LossResult
 from architectures.ministral_3_3b_instruct import Ministral3TokenConfig
 
 # Import for Monte Carlo uncertainty computation
-from heteroscedastic_utils import compute_heteroscedastic_log_probs
-
+from heteroscedastic_utils import (
+    compute_heteroscedastic_log_probs,
+    compute_learned_heteroscedastic_log_probs 
+)
 
 # =============================================================================
 # GDPO Base Class - Common functionality for all GDPO variants
@@ -326,32 +328,70 @@ class GDPOBase:
         return kl_per_sample
     
     def prepare_references(
-        self, 
-        inputs: Dict[str, torch.Tensor], 
+        self,
+        inputs: Dict[str, torch.Tensor],
         effective_G: int
     ) -> Optional[List[str]]:
         """
         Prepare expanded references for reward calculation.
-        
+
+        Priority:
+        1. Ref model generation (if self.ref_model is not None) — greedy decode
+        2. Labels-based decode (기존 방식, SFT 데이터용)
+
         Args:
-            inputs: Input dict containing optional 'labels'
+            inputs: Input dict containing 'input_ids', 'attention_mask', optional 'labels'
             effective_G: Effective group size (G or 2G)
-        
+
         Returns:
             expanded_refs: List of reference strings expanded to match batch size, or None
         """
-        expanded_refs = None
-        
+        # Priority 1: Ref model 생성 (GDPO post-training용)
+        if self.ref_model is not None and "input_ids" in inputs:
+            input_ids = inputs["input_ids"]
+            attention_mask = inputs.get(
+                "attention_mask",
+                (input_ids != self.tokenizer.pad_token_id).long()
+            )
+
+            with torch.no_grad():
+                ref_sequences = self.ref_model.generate(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    max_new_tokens=self.max_new_tokens,
+                    do_sample=False,  # greedy for deterministic reference
+                    pad_token_id=self.tokenizer.pad_token_id,
+                )
+
+            # Decode generated part only (prompt 부분 제외)
+            prompt_len = input_ids.shape[1]
+            ref_new_tokens = ref_sequences[:, prompt_len:]
+            references = self.tokenizer.batch_decode(
+                ref_new_tokens, skip_special_tokens=False
+            )
+
+            if self.debug:
+                print(f"[DEBUG] Ref model generated {len(references)} references")
+                if references:
+                    print(f"[DEBUG] Ref[0] (first 100 chars): {references[0][:100]}")
+
+            expanded_refs = []
+            for ref in references:
+                expanded_refs.extend([ref] * effective_G)
+            return expanded_refs
+
+        # Priority 2: Labels 기반 (기존 SFT 데이터 방식)
         if "labels" in inputs:
             valid_labels = inputs["labels"].clone()
             valid_labels[valid_labels == -100] = self.tokenizer.pad_token_id
             references = self.tokenizer.batch_decode(valid_labels, skip_special_tokens=True)
-            
+
             expanded_refs = []
             for ref in references:
                 expanded_refs.extend([ref] * effective_G)
-        
-        return expanded_refs
+            return expanded_refs
+
+        return None
     
     def prepare_gt_tool_calls(
         self, 
@@ -592,8 +632,8 @@ class GDPOBase:
         think_start = token_config.THINK_START or "[THINK]"
         think_end = token_config.THINK_END or "[/THINK]"
         
-        texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=True)
-        
+        texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
+
         B = input_ids.shape[0]
         questions_raw = self.tokenizer.batch_decode(input_ids, skip_special_tokens=True)
         effective_G = len(texts) // B
@@ -894,8 +934,8 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
         num_objectives += 1
     
     batch_size = sequences.shape[0]
-    texts = tokenizer.batch_decode(sequences, skip_special_tokens=True)
-    
+    texts = tokenizer.batch_decode(sequences, skip_special_tokens=False)
+
     rewards = torch.zeros(batch_size, num_objectives)
     
     # Set token config defaults
@@ -1013,20 +1053,23 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
             failed_level = 3
         
         # Apply hierarchical zeroing
-        if failed_level >= 1:
+        if failed_level == 1:
+            # Tool Correctness 실패: acc, medium, easy 전부 zero
             acc_score = 0.0
             uncertainty_reward = 0.0
             reasoning_quality_reward = 0.0
             format_score = 0.0
             length_score = 0.0
             tool_format_score = 0.0
-        elif failed_level >= 2:
+        elif failed_level == 2:
+            # Accuracy 실패: medium, easy zero
             uncertainty_reward = 0.0
             reasoning_quality_reward = 0.0
             format_score = 0.0
             length_score = 0.0
             tool_format_score = 0.0
-        elif failed_level >= 3:
+        elif failed_level == 3:
+            # Medium 실패: easy만 zero
             format_score = 0.0
             length_score = 0.0
             tool_format_score = 0.0
@@ -1578,7 +1621,7 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         
         if not hasattr(outputs, 'log_variance') or outputs.log_variance is None:
             raise ValueError("Model outputs must include 'log_variance' for heteroscedastic loss.")
-        shift_log_var=outputs.log_variance[..., :-1:, :].contiguous()  # Align with shift_logits
+        shift_log_var=outputs.log_variance[..., :-1, :].contiguous()  # Align with shift_logits
         
         variance = torch.exp(shift_log_var.squeeze(-1))  # 학습된 불확실성 수치화
 
@@ -1605,13 +1648,13 @@ class HeteroscedasticGDPOLoss(GDPOBase):
                 certain_input_ids = input_ids[certain_indices % B]
                 certain_refs=None
                 if expanded_refs:
-                    certain_refs=[expanded_refs[i] for i in certain_indices]
+                    certain_refs=[expanded_refs[i.item()] for i in certain_indices]
 
                 partial_rq_scores=self.judge_rollout_reasoning(certain_seqs, certain_input_ids, certain_refs)
                 rq_scores[certain_indices] = partial_rq_scores.to(model.device)
 
         T = self.gdpo_config.get("heteroscedastic_T", 3)
-        prob_correct_log, _ = compute_heteroscedastic_log_probs(
+        prob_correct_log, _ = compute_learned_heteroscedastic_log_probs(
             shift_logits, shift_log_var, shift_labels, T=T, sequential=False)
         prob_correct = torch.exp(prob_correct_log.clamp(max=0))
         prob_correct_per_sample = (prob_correct * combined_mask).sum(dim=1) / (combined_mask.sum(dim=1) + eps)
