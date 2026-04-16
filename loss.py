@@ -124,6 +124,11 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
     shift_labels = labels[..., 1:].contiguous()
     shift_log_var = log_variance[..., :-1, :].contiguous()
 
+    # Pre-compute predictions before freeing outputs for predict logging
+    # shift_logits is an independent copy (.contiguous()), so argmax is safe before del
+    predicted_ids = shift_logits.argmax(dim=-1).detach()  # (batch, seq_len-1)
+    pred_response_mask = (shift_labels != -100)            # (batch, seq_len-1)
+
     # Free original tensors before MC sampling to reclaim VRAM
     # shift_logits/shift_log_var are independent copies (.contiguous()), so this is safe
     # Saves ~10.7 GB (the original logits tensor held by outputs)
@@ -166,7 +171,9 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
             "variance_mean": sigma_stats["variance_mean"],
             "log_variance_mean": sigma_stats["log_variance_mean"],
         },
-        outputs=None  # outputs freed before MC sampling for VRAM efficiency
+        outputs=None,          # outputs freed before MC sampling for VRAM efficiency
+        predicted_ids=predicted_ids,
+        response_mask=pred_response_mask,
     )
 
 

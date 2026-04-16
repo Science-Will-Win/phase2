@@ -167,16 +167,23 @@ def run_training(args):
                         )
 
                 elif loss_result.predicted_ids is not None:
-                    # Fallback: use pre-computed prediction info (heteroscedastic case)
-                    # outputs were freed for VRAM, but predicted_ids were saved beforehand
+                    # Fallback: use pre-computed prediction info
+                    # (heteroscedastic: logits argmax saved before del,
+                    #  GDPO sequential: first generated sequence saved before del)
                     preds = loss_result.predicted_ids
                     mask = loss_result.response_mask
-                    shift_labels = inputs["labels"][..., 1:]
-                    correct = ((preds == shift_labels) & mask).sum().item()
-                    total = mask.sum().item()
-                    train_accuracy = (correct / total * 100) if total > 0 else 0.0
 
-                    # predict_text: response_start is in unshifted space, adjust -1 for shifted ids
+                    # accuracy: shape이 일치할 때만 계산
+                    # (SFT: preds shape == shift_labels shape,
+                    #  GDPO: gen_len ≠ label seq_len → skip)
+                    if "labels" in inputs and inputs["labels"] is not None:
+                        shift_labels = inputs["labels"][..., 1:]
+                        if preds.shape == shift_labels.shape:
+                            correct = ((preds == shift_labels) & mask).sum().item()
+                            total = mask.sum().item()
+                            train_accuracy = (correct / total * 100) if total > 0 else 0.0
+
+                    # predict_text: shape 무관, 항상 추출
                     pred_start = max(response_start - 1, 0)
                     seq_len = len(preds[0])
                     if "attention_mask" in inputs and inputs["attention_mask"] is not None:
@@ -299,22 +306,68 @@ def run_training(args):
         # Load Model
         model = model_module.get_model(args)
         print_memory_stats("After Base Model Load")
-        
+
+        # ── LoRA wrapping (optional, before freeze logic) ──
+        # Wraps the base model with PEFT LoRA adapters.
+        # log_variance_head is NOT in modules_to_save → stays in base model,
+        # not packaged with LoRA adapter. Trained via requires_grad=True below.
+        # After training, head weights are saved to {BASE_PATH}/heads/ for reuse.
+        if args.use_lora:
+            from peft import LoraConfig, get_peft_model, TaskType
+
+            target_modules = [m.strip() for m in args.lora_target_modules.split(",") if m.strip()]
+            lora_cfg = LoraConfig(
+                r=args.lora_rank,
+                lora_alpha=args.lora_alpha,
+                lora_dropout=args.lora_dropout,
+                bias=args.lora_bias,
+                target_modules=target_modules,
+                task_type=TaskType.CAUSAL_LM,
+            )
+            # autocast_adapter_dtype=False: peft 0.19 references float8_e8m0fnu
+            # which doesn't exist in torch 2.6. Model is already bf16, so safe to skip.
+            model = get_peft_model(model, lora_cfg, autocast_adapter_dtype=False)
+
+            # Sanity: ensure log_variance_head params are trainable
+            for name, p in model.named_parameters():
+                if "log_variance_head" in name:
+                    p.requires_grad = True
+
+            if hasattr(model, "print_trainable_parameters"):
+                print("[INFO] LoRA wrapping complete. Trainable parameter summary:")
+                model.print_trainable_parameters()
+            print_memory_stats("After LoRA Wrap")
+
         # Ensure lm_head (or final layer) is trainable if we are freezing
-        # Note: embed_tokens is excluded because it's at the input side.
-        # With tie_word_embeddings=True, lm_head shares weights with embed_tokens,
-        # so gradients will update the shared weight through lm_head's path only.
+        # Note: With tie_word_embeddings=True, lm_head does NOT appear in
+        # named_parameters() (PyTorch deduplicates by data_ptr). Use
+        # --train_embeddings to explicitly unfreeze embed_tokens/lm_head.
         if args.freeze_until_layer:
              for name, param in model.named_parameters():
                  if "lm_head" in name or "embed_out" in name:
                      param.requires_grad = True
                      if args.debug:
                          print(f"[DEBUG] Explicitly enabled gradients for: {name}")
-        
+
+        # --train_embeddings: unfreeze embed_tokens even when layers are frozen.
+        # Direct tensor access is required because tie_word_embeddings=True makes
+        # lm_head.weight invisible in named_parameters() (same data_ptr as embed_tokens).
+        if args.train_embeddings:
+            embed_param = None
+            if hasattr(model, 'model') and hasattr(model.model, 'embed_tokens'):
+                embed_param = model.model.embed_tokens.weight
+            elif hasattr(model, 'get_input_embeddings'):
+                embed_param = model.get_input_embeddings().weight
+            if embed_param is not None:
+                embed_param.requires_grad = True
+                print(f"[INFO] --train_embeddings: embed_tokens.weight requires_grad=True "
+                      f"(shape={list(embed_param.shape)})")
+
         # Enable input gradients to ensure the graph is connected
-        # Only needed for full training; when freezing layers, this would force
-        # activation storage for all frozen layers (wasting memory)
-        if not args.freeze_until_layer:
+        # Needed for full training OR when training embeddings with frozen layers.
+        # Skipped under LoRA: get_peft_model() already handles input-require-grad internally,
+        # and double-registering breaks the forward hook chain.
+        if not args.use_lora and (not args.freeze_until_layer or args.train_embeddings):
             if hasattr(model, "enable_input_require_grads"):
                 model.enable_input_require_grads()
             else:
@@ -349,6 +402,11 @@ def run_training(args):
         time_str = now.strftime("%H%M%S")
         
         freeze_str = args.freeze_until_layer if args.freeze_until_layer else "full"
+        if args.train_embeddings:
+            freeze_str += "+emb"
+        if args.use_lora:
+            # LoRA fully replaces the freeze annotation (base is frozen by LoRA semantics)
+            freeze_str = f"lora-r{args.lora_rank}-a{args.lora_alpha}"
         
         if args.save_strategy == "steps":
             save_info = f"{args.save_steps}step"
@@ -549,12 +607,33 @@ def run_training(args):
             torch.cuda.empty_cache()
             gc.collect()
         
-        # Save model with safetensors format
-        model.save_pretrained(final_output_dir, safe_serialization=True)
-        print("Model saved with safetensors format.")
-        
-        tokenizer.save_pretrained(final_output_dir)
-        print("Tokenizer saved.")
+        # Save model in base model format (compatible with vLLM without conversion)
+        from model_saver import save_model_as_base_format, save_head_weights
+
+        base_model_dir = file_config.BASE_PATH if file_config else None
+
+        if args.use_lora:
+            # (a) LoRA adapter 분리 저장
+            adapter_dir = os.path.join(final_output_dir, "lora_adapter")
+            model.save_pretrained(adapter_dir)
+            print(f"[INFO] LoRA adapter saved to {adapter_dir}")
+
+            # (b) Trained head weights → base model 디렉토리에 저장
+            if base_model_dir:
+                save_head_weights(model, base_model_dir)
+
+            # (c) LoRA를 base에 병합 + PeftModel 해제
+            # → state_dict 키가 원래 형식으로 복원 (model_saver 호환)
+            model = model.merge_and_unload()
+            print("[INFO] LoRA merged and unloaded for base format save")
+
+        save_model_as_base_format(
+            model=model,
+            tokenizer=tokenizer,
+            output_dir=final_output_dir,
+            base_model_dir=base_model_dir,
+            max_shard_bytes=5_000_000_000,
+        )
         
         # Save token error tracking results (if enabled)
         if args.track_token_errors and hasattr(trainer, 'token_error_tracker'):
@@ -703,8 +782,7 @@ if __name__ == "__main__":
     # Distributed Training
     parser.add_argument("--fsdp", action="store_true",
                         help="Enable FSDP (Fully Sharded Data Parallel) for multi-GPU memory optimization. "
-                             "Shards model weights, optimizer states, and gradients across GPUs. "
-                             "Requires torchrun launch.")
+                             "Automatically launches with torchrun if needed.")
 
     # Training Stability
     parser.add_argument("--random_seed", type=int, default=-1,
@@ -728,10 +806,13 @@ if __name__ == "__main__":
                              help="Explicit path to load model weights from (overrides default resolved path)")
     model_group.add_argument("--load_until_layer", type=str, default=None, 
                              help="Load weights only up to this layer name (inclusive)")
-    model_group.add_argument("--freeze_until_layer", type=str, default=None, 
+    model_group.add_argument("--freeze_until_layer", type=str, default=None,
                              help="Freeze gradients up to this layer name (inclusive). "
                                   "Use layer number (e.g., '24') or '-1' to freeze ALL layers "
                                   "(useful for training only new parameters like mHC)")
+    model_group.add_argument("--train_embeddings", action="store_true", default=False,
+                             help="Train embed_tokens even when layers are frozen. "
+                                  "Handles tie_word_embeddings by direct tensor access.")
     model_group.add_argument("--base_model_path", type=str, default=None,
                              help="Path to base model for partial weight loading. "
                                   "Loads matching weights from base model into target model. "
@@ -751,5 +832,39 @@ if __name__ == "__main__":
                                   "fp8=FP8 storage→BF16 compute (default), "
                                   "bf16/fp16/fp32=pure precision")
 
+    # ── LoRA Hyperparameters ──
+    lora_group = parser.add_argument_group("LoRA Hyperparameters")
+    lora_group.add_argument("--use_lora", action="store_true",
+                            help="Wrap the base model with LoRA adapters before training. "
+                                 "log_variance_head stays fully trainable via modules_to_save.")
+    lora_group.add_argument("--lora_rank", type=int, default=16,
+                            help="LoRA rank r (default: 16).")
+    lora_group.add_argument("--lora_alpha", type=int, default=32,
+                            help="LoRA alpha (scaling = alpha/r). Default: 32.")
+    lora_group.add_argument("--lora_dropout", type=float, default=0.05,
+                            help="LoRA dropout (default: 0.05).")
+    lora_group.add_argument("--lora_target_modules", type=str,
+                            default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+                            help="Comma-separated module name suffixes to inject LoRA into. "
+                                 "Default: all attention + MLP projections.")
+    lora_group.add_argument("--lora_bias", type=str, default="none",
+                            choices=["none", "all", "lora_only"],
+                            help="PEFT bias setting (default: 'none').")
+
     args = parser.parse_args()
+
+    # Auto-relaunch with torchrun when --fsdp is specified but not already under torchrun
+    if args.fsdp and "LOCAL_RANK" not in os.environ:
+        from utils.gpu_config import configure_gpu
+        gpu_ids = configure_gpu()  # sets CUDA_VISIBLE_DEVICES
+        num_gpus = len(gpu_ids.split(",")) if gpu_ids else 1
+        if num_gpus < 2:
+            print(f"[WARNING] --fsdp requires 2+ GPUs. Current: {gpu_ids}. Proceeding single-GPU.")
+        else:
+            cmd = [sys.executable, "-m", "torch.distributed.run",
+                   f"--nproc_per_node={num_gpus}"] + sys.argv
+            print(f"[FSDP] Auto-launching with torchrun: {' '.join(cmd)}")
+            os.execvp(sys.executable, cmd)
+            # execvp replaces process, never reaches here
+
     run_training(args)

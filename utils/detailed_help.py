@@ -638,6 +638,125 @@ Weight for reasoning quality reward in GDPO advantage calculation.
 Only effective when --gdpo_enable_reasoning_judge is enabled.
 """,
 
+    # ===================
+    # LoRA Arguments
+    # ===================
+    "use_lora": """--use_lora: Enable LoRA (Low-Rank Adaptation) training
+
+Usage:
+  --use_lora    Wrap the base model with LoRA adapters before training
+
+Behavior:
+  - Base model weights are frozen (not updated)
+  - Only LoRA adapter weights (A, B matrices) are trained
+  - log_variance_head is kept fully trainable via modules_to_save
+  - ~99.7% of parameters frozen → much lower memory and faster training
+
+Recommended for:
+  - Training on a single GPU with limited VRAM
+  - Starting from a base model (not a partially frozen SFT model)
+  - When you want to retain base model capabilities
+
+Note:
+  - Use --lora_rank, --lora_alpha, --lora_target_modules to configure
+  - Do NOT combine with --freeze_until_layer (LoRA already freezes the base)
+  - Learning rate should be ~10x higher than full fine-tuning (e.g. 2e-4)
+""",
+
+    "lora_rank": """--lora_rank: LoRA rank (r)
+
+Usage:
+  --lora_rank 4     Very small, minimal expressivity
+  --lora_rank 8     Memory-efficient (recommended for local GPU)
+  --lora_rank 16    Default, good balance
+  --lora_rank 32    Higher expressivity, more memory
+  --lora_rank 64    Maximum expressivity
+
+Memory impact:
+  - Each LoRA layer adds 2 matrices: A (hidden × r) and B (r × hidden)
+  - Trainable params ∝ r
+  - Optimizer state ∝ r (AdamW stores m and v for each param)
+
+Scaling law:
+  - Effective rank needed depends on task complexity
+  - r=8 is usually sufficient for domain adaptation
+  - r=16~32 for more complex behavioral changes
+""",
+
+    "lora_alpha": """--lora_alpha: LoRA scaling factor (alpha)
+
+Usage:
+  --lora_alpha 16    Match rank (scaling=1.0)
+  --lora_alpha 32    Default (scaling=2.0 when rank=16)
+  --lora_alpha 64    Stronger scaling
+
+Formula:
+  effective_lr = learning_rate × (alpha / rank)
+
+Convention:
+  - Common practice: alpha = 2 × rank
+  - alpha=32 with rank=16 → scaling=2.0 (amplifies LoRA updates)
+  - alpha=rank → scaling=1.0 (neutral)
+
+Note:
+  - Higher alpha = stronger LoRA influence
+  - If loss diverges, try lowering alpha or learning_rate
+""",
+
+    "lora_dropout": """--lora_dropout: LoRA dropout rate
+
+Usage:
+  --lora_dropout 0.0     No dropout (deterministic, faster)
+  --lora_dropout 0.05    Default (light regularization)
+  --lora_dropout 0.1     Stronger regularization
+
+Behavior:
+  - Applied to LoRA A matrix output during training
+  - Disabled during inference (eval mode)
+  - Helps prevent overfitting on small datasets
+
+Recommendation:
+  - Small datasets (< 1000 samples): 0.05~0.1
+  - Large datasets: 0.0~0.05
+""",
+
+    "lora_target_modules": """--lora_target_modules: Modules to apply LoRA adapters to
+
+Usage:
+  --lora_target_modules "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
+    Default: all attention + MLP projections (7 module types × 26 layers = 182 modules)
+
+  --lora_target_modules "q_proj,v_proj"
+    Attention-only, minimal (common in original LoRA paper)
+
+  --lora_target_modules "q_proj,k_proj,v_proj,o_proj"
+    Attention-only, full
+
+Module types in Ministral 3B:
+  Attention:  q_proj (3072×3072), k_proj (3072×1024), v_proj (3072×1024), o_proj (3072×3072)
+  MLP:        gate_proj (3072×8192), up_proj (3072×8192), down_proj (8192×3072)
+
+Memory vs expressivity:
+  "q_proj,v_proj"          → ~5M trainable params  (minimal)
+  "q_proj,k,v,o_proj"      → ~9M trainable params  (attention only)
+  all 7 (default)          → ~11M trainable params (full)
+
+Note: Comma-separated, no spaces
+""",
+
+    "lora_bias": """--lora_bias: Whether to train bias parameters in LoRA layers
+
+Usage:
+  --lora_bias none        Default: don't train any biases
+  --lora_bias lora_only   Train biases in LoRA layers only
+  --lora_bias all         Train all biases in the model
+
+Recommendation:
+  - none: Default, safest and most memory-efficient
+  - lora_only: Slight expressivity boost with minimal overhead
+  - all: Rarely needed, increases trainable params significantly
+""",
+
     "heteroscedastic_sequential": """--heteroscedastic_sequential: Use sequential MC sampling
 
 Usage:

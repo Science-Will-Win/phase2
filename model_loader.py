@@ -327,13 +327,30 @@ def load_model_weights(model, weight_path, load_until=None):
                 break
         print("="*30 + "\n")
     
+    # Load trained head weights from heads/ subdirectory (if available)
+    # Extensible pattern: each .safetensors file in heads/ is auto-loaded,
+    # overriding zero-initialized weights (e.g., log_variance_head).
+    if os.path.isdir(weight_path):
+        heads_dir = os.path.join(weight_path, "heads")
+        if os.path.isdir(heads_dir):
+            for head_file in sorted(os.listdir(heads_dir)):
+                if head_file.endswith(".safetensors"):
+                    head_path = os.path.join(heads_dir, head_file)
+                    head_name = head_file.replace(".safetensors", "")
+                    head_weights = load_file(head_path, device=str(device))
+                    head_weights = {k: v.to(dtype=dtype) for k, v in head_weights.items()}
+                    msg = model.load_state_dict(head_weights, strict=False)
+                    loaded_count = len(head_weights) - len(msg.unexpected_keys)
+                    print(f"[DEBUG] Loaded head '{head_name}': {loaded_count} weights from {head_file}")
+                    missing_keys -= set(head_weights.keys())
+
     # Release temporary memory from FP8 dequantization and loading process
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         allocated = torch.cuda.memory_allocated() / 1024**3
         reserved = torch.cuda.memory_reserved() / 1024**3
         print(f"[DEBUG] VRAM after loading: Allocated={allocated:.2f}GB, Reserved={reserved:.2f}GB")
-            
+
     return model
 
 

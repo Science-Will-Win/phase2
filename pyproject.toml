@@ -17,6 +17,7 @@ dependencies = [
     "pick==2.4.0",
     "matplotlib==3.10.8",
     "scikit-learn==1.8.0",
+    "peft>=0.11.0",
 ]
 
 [build-system]

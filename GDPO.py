@@ -1450,13 +1450,21 @@ class GDPOLoss(GDPOBase):
         if temp_rewards is not None:
             components["reward_temperature"] = reward_means[idx].item()
         
+        # Extract first generated sample for predict logging before cleanup
+        # del right before return has no VRAM benefit (locals freed on return anyway)
+        pred_ids = sequences_list[0][:1, input_len:].clone()   # (1, gen_len)
+        pred_mask = (pred_ids != self.tokenizer.pad_token_id)  # (1, gen_len)
+
         # Memory cleanup
         del sequences_list, sequences, rewards_flat, rewards
         del all_log_probs, all_valid_masks, all_shift_labels
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        
-        return LossResult(total_loss=total_loss, components=components, outputs=None)
+
+        return LossResult(
+            total_loss=total_loss, components=components, outputs=None,
+            predicted_ids=pred_ids, response_mask=pred_mask,
+        )
 
 
 class HeteroscedasticGDPOLoss(GDPOBase):
@@ -1961,14 +1969,22 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         if temp_rewards is not None:
             components["reward_temperature"] = reward_means[idx].item()
         
+        # Extract first generated sample for predict logging before cleanup
+        # del right before return has no VRAM benefit (locals freed on return anyway)
+        pred_ids = padded_sequences_list[0][:1, input_len:].clone()  # (1, gen_len)
+        pred_mask = (pred_ids != self.tokenizer.pad_token_id)        # (1, gen_len)
+
         # Memory cleanup
         del sequences_list, padded_sequences_list, rewards_flat, rewards
         del all_log_probs, all_valid_masks, all_shift_labels
         del all_prob_correct, all_uncertainty, uncertainty_scores, prob_correct_all
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        
-        return LossResult(total_loss=total_loss, components=components, outputs=None)
+
+        return LossResult(
+            total_loss=total_loss, components=components, outputs=None,
+            predicted_ids=pred_ids, response_mask=pred_mask,
+        )
 
 
 # =============================================================================
