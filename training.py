@@ -476,6 +476,7 @@ def run_training(args):
         # We strictly use the arguments provided by the user + dynamic precision flags.
         training_args = TrainingArguments(
             output_dir=final_output_dir,
+            gradient_checkpointing=args.gradient_checkpointing,
             per_device_train_batch_size=args.batch_size,
             per_device_eval_batch_size=args.batch_size,
             num_train_epochs=args.epochs,
@@ -692,6 +693,8 @@ if __name__ == "__main__":
     parser.add_argument("--save_steps", type=int, default=500, 
                         help="Save checkpoint every X updates steps.")
     
+    parser.add_argument("--gradient_checkpointing", action="store_true",
+                        help="Enable gradient checkpointing to reduce activation memory (~1/3) at cost of ~30%% slower training.")
     parser.add_argument("--logging_steps", type=int, default=10, help="Log metrics every N steps")
 
     # Optimizer & Scheduler Arguments
