@@ -637,7 +637,8 @@ class Mistral3MultiModalProjector(nn.Module):
 
 class Mistral3TextModel(PreTrainedModel):
     config_class = Ministral3TextConfig
-    
+    supports_gradient_checkpointing = True
+
     def __init__(self, config: Union[Ministral3TextConfig, dict]):
         if isinstance(config, dict):
             config = Ministral3TextConfig(**config)
@@ -727,14 +728,27 @@ class Mistral3TextModel(PreTrainedModel):
             else:
                 past_key_value = past_key_values
 
-            layer_outputs = decoder_layer(
-                hidden_states,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                past_key_value=past_key_value,
-                output_attentions=output_attentions,
-                use_cache=use_cache,
-            )
+            if self.gradient_checkpointing and self.training:
+                # use_cache must be False during gradient checkpointing
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    decoder_layer,
+                    hidden_states,
+                    attention_mask,
+                    position_ids,
+                    past_key_value,
+                    output_attentions,
+                    False,  # use_cache
+                    use_reentrant=False,
+                )
+            else:
+                layer_outputs = decoder_layer(
+                    hidden_states,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    past_key_value=past_key_value,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                )
 
             hidden_states = layer_outputs[0]
 
@@ -792,8 +806,9 @@ class Mistral3ForConditionalGeneration(PreTrainedModel, GenerationMixin):
     Combines Pixtral Vision Tower + Multimodal Projector + Mistral3 Text Model.
     """
     config_class = Mistral3Config
+    supports_gradient_checkpointing = True
     _tied_weights_keys = {"lm_head.weight": "model.embed_tokens.weight"}
-    
+
     def __init__(self, config: Mistral3Config):
         super().__init__(config)
         
