@@ -7,9 +7,16 @@ CSVLoggingCallback: Integration with Trainer
 TokenErrorTracker: Token-level error tracking for validation
 """
 import os
+import re
 import gc
+import csv
 import pandas as pd
 from datetime import datetime
+
+# Excel illegal control chars (openpyxl rejects these)
+_EXCEL_ILLEGAL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+# Excel cell text limit
+_EXCEL_CELL_LIMIT = 32000
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 from collections import Counter
@@ -151,7 +158,28 @@ class TrainingLogger:
         
         record.update(extra)
         self.records.append(record)
-    
+
+    def log_summary(self, step: int, epoch, **extra):
+        """
+        Log summary-level data (epoch averages, eval metrics).
+
+        Unlike log(), this merges into the last record if step/epoch match,
+        preventing duplicate rows from multiple end-of-epoch callbacks
+        (EpochSummaryCallback, EvalAccuracyCallback).
+        """
+        if self.records:
+            last = self.records[-1]
+            if last.get("step") == step and last.get("epoch") == epoch:
+                for k, v in extra.items():
+                    # Only fill if current value is missing/None (don't overwrite)
+                    if last.get(k) is None:
+                        last[k] = v
+                return
+        # Otherwise create new row
+        record = {"step": step, "epoch": epoch}
+        record.update(extra)
+        self.records.append(record)
+
     def save(self):
         """Save to CSV file (overwrite)"""
         if not self.records:
@@ -159,8 +187,50 @@ class TrainingLogger:
             return
         
         df = pd.DataFrame(self.records)
-        df.to_csv(self.output_path, index=False, encoding='utf-8-sig')
+
+        # Escape embedded newlines in string fields to literal \n
+        # Excel has a long-standing bug where quoted fields with embedded LF
+        # still get split as row breaks, even with proper RFC 4180 quoting.
+        def _escape_nl(x):
+            if pd.isna(x):
+                return ''
+            s = str(x)
+            return s.replace('\r\n', r'\n').replace('\n', r'\n').replace('\r', r'\r')
+
+        for col in df.columns:
+            # Check for string-like columns (object, str, or StringDtype)
+            if df[col].dtype.kind in ('O', 'U', 'S') or str(df[col].dtype) in ('str', 'string'):
+                df[col] = df[col].apply(_escape_nl)
+
+        # CRLF + QUOTE_ALL for Windows Excel compatibility
+        df.to_csv(
+            self.output_path, index=False, encoding='utf-8-sig',
+            lineterminator='\r\n', quoting=csv.QUOTE_ALL,
+        )
         print(f"[TrainingLogger] Saved {len(self.records)} records to {self.output_path}")
+
+        # Also save XLSX (Excel native, no parsing issues, cell-accurate display)
+        xlsx_path = self.output_path.rsplit('.csv', 1)[0] + '.xlsx'
+        try:
+            df_x = df.copy()
+            # Remove Excel-illegal control chars and truncate long cells
+            for col in df_x.columns:
+                if df_x[col].dtype.kind in ('O', 'U', 'S') or str(df_x[col].dtype) in ('str', 'string'):
+                    df_x[col] = df_x[col].apply(
+                        lambda v: '' if pd.isna(v) else _EXCEL_ILLEGAL_RE.sub('', str(v))
+                    )
+            for col in ('predict', 'label'):
+                if col in df_x.columns:
+                    df_x[col] = df_x[col].apply(
+                        lambda s: s if len(s) <= _EXCEL_CELL_LIMIT
+                        else s[:_EXCEL_CELL_LIMIT] + f'...[truncated, {len(s)} chars total]'
+                    )
+            df_x.to_excel(xlsx_path, index=False, engine='openpyxl')
+            print(f"[TrainingLogger] Also saved XLSX to {xlsx_path}")
+        except ImportError:
+            print("[TrainingLogger] openpyxl not installed, skipping XLSX save")
+        except Exception as e:
+            print(f"[TrainingLogger] XLSX save failed: {e}")
 
 
 class CSVLoggingCallback(TrainerCallback):
@@ -219,33 +289,32 @@ class EvalAccuracyCallback(TrainerCallback):
         self.logger = logger
     
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
-        """Log epoch accuracy, eval_loss, and reset epoch counters."""
+        """Log epoch accuracy, eval_loss, and reset epoch counters (merged into one row)."""
         trainer = self.trainer_ref
         epoch = int(state.epoch) if state.epoch else 0
-        
+
+        summary_fields = {}
+
         # Capture eval_loss from HuggingFace metrics
         if metrics and 'eval_loss' in metrics:
-            self.logger.log(
-                step=state.global_step,
-                epoch=epoch,
-                eval_loss=metrics['eval_loss']
-            )
-        
+            summary_fields['eval_loss'] = metrics['eval_loss']
+
+        # Capture eval_accuracy from token error tracker
+        accuracy = None
         if hasattr(trainer, 'token_error_tracker'):
             accuracy = trainer.token_error_tracker.get_epoch_accuracy()
-            
-            # Log eval_accuracy to records for visualization
-            self.logger.log(
-                step=state.global_step,
-                epoch=epoch,
-                eval_accuracy=accuracy
-            )
-            
-            # Reset epoch counters for next evaluation
+            summary_fields['eval_accuracy'] = accuracy
             trainer.token_error_tracker.reset_epoch()
-            
+
+        # Single merged log call (no duplicate rows)
+        if summary_fields:
+            self.logger.log_summary(
+                step=state.global_step, epoch=epoch, **summary_fields,
+            )
+
+        if accuracy is not None:
             print(f"[EvalAccuracyCallback] Epoch {epoch} - Val Loss: {metrics.get('eval_loss', 'N/A'):.4f}, Val Accuracy: {accuracy:.2f}%")
-        
+
         return control
 
 
@@ -275,12 +344,12 @@ class EpochSummaryCallback(TrainerCallback):
         if trainer.epoch_step_count > 0:
             avg_loss = trainer.epoch_loss_sum / trainer.epoch_step_count
             avg_acc = trainer.epoch_accuracy_sum / trainer.epoch_step_count
-            
-            self.logger.log(
+
+            self.logger.log_summary(
                 step=state.global_step,
                 epoch=epoch,
                 train_loss=avg_loss,
-                train_accuracy=avg_acc
+                train_accuracy=avg_acc,
             )
             
             # Print summary for debugging
@@ -412,6 +481,9 @@ class TokenErrorTracker:
         })
         
         df = pd.DataFrame(records)
-        df.to_csv(output_path, index=False, encoding='utf-8-sig')
+        df.to_csv(
+            output_path, index=False, encoding='utf-8-sig',
+            lineterminator='\r\n', quoting=csv.QUOTE_ALL,
+        )
         print(f"[TokenErrorTracker] Saved {len(records)-2} error types to {output_path}")
         print(f"[TokenErrorTracker] Accuracy: {accuracy:.2f}% ({self.correct_tokens}/{self.total_tokens})")

@@ -122,7 +122,11 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
     # Shift for next-token prediction
     shift_logits = logits[..., :-1, :].contiguous()
     shift_labels = labels[..., 1:].contiguous()
-    shift_log_var = log_variance[..., :-1, :].contiguous()
+    # Clamp log_variance to prevent sigma explosion.
+    # sigma = exp(log_var/2): min=-10 → σ=0.0067, max=1 → σ=1.65
+    # Without clamp, observed sigma_max=82 during training (degenerate solution
+    # where MC noise dominates logits → model collapses to trivial token like EOS).
+    shift_log_var = log_variance[..., :-1, :].contiguous().clamp(min=float("-inf"), max=float("inf"))
 
     # Pre-compute predictions before freeing outputs for predict logging
     # shift_logits is an independent copy (.contiguous()), so argmax is safe before del

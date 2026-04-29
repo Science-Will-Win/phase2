@@ -155,12 +155,16 @@ def run_training(args):
                         train_accuracy = (correct / total * 100) if total > 0 else 0.0
 
                     # Generate predict_text for logging
+                    # logits[i] predicts position i+1, so prediction for token at position
+                    # response_start comes from logits[response_start - 1]. Align slicing
+                    # with fallback path (pred_start = response_start - 1, range ends at seq_len - 1).
                     predicted_ids = logits.argmax(dim=-1)
                     seq_len = len(predicted_ids[0])
                     if "attention_mask" in inputs and inputs["attention_mask"] is not None:
                         seq_len = inputs["attention_mask"][0].sum().item()
 
-                    predict_ids = predicted_ids[0][response_start:seq_len]
+                    pred_start = max(response_start - 1, 0)
+                    predict_ids = predicted_ids[0][pred_start:seq_len - 1]
                     if len(predict_ids) > 0:
                         predict_text = self.processing_class.decode(
                             predict_ids, skip_special_tokens=False
