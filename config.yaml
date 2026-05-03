@@ -1,28 +1,26 @@
-# 환경별 경로 설정
 paths:
   local:
-    model: "model"
-    data: "data"
-    result: "result"
-    log: "inference_ui/logs"
-    temp_data: "preference_ui/temp_data"
-  
+    model: model
+    data: data
+    result: result
+    log: inference_ui/logs
+    temp_data: preference_ui/temp_data
   server:
-    model: "/raid/sww/model"
-    data: "/raid/sww/data"
-    result: "/raid/sww/result"
-    log: "/raid/sww/log"
-    temp_data: "/raid/sww/temp_data"
-
-# 기본 환경 (--local 없으면 server 사용)
-default_environment: "server"
-
-# LLM Reasoning Judge configuration
-# Mode: api_key or base_url set -> API mode, neither -> Local mode
+    model: model
+    data: data
+    result: result
+    log: inference_ui/logs
+    temp_data: preference_ui/temp_data
+default_environment: server
 reasoning_judge:
-  base_url: ""                  # API endpoint (empty = Local mode, set URL = API mode)
-  api_key: ""                   # API key (empty = Local mode or keyless server like vLLM)
-  model: "biomni-r0-32b"       # Judge model name
-  use_vllm: false               # vLLM internal integration (not yet implemented)
-  timeout: 30                   # API timeout in seconds
-  max_workers: 8                # API mode: concurrent call threads
+  base_url: ''
+  api_key: ''
+  model: biomni-r0-32b
+  use_vllm: false
+  timeout: 30
+  max_workers: 8
+active_model:
+  mode: local
+  local_model: ministral_3_3b_instruct
+  api_provider: ''
+  api_model: ''

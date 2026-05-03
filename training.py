@@ -260,7 +260,9 @@ def run_training(args):
     # Training Logic
     # ==========================================================================
     # Set environment based on --local flag (for path management)
-    set_local_mode(args.local)
+    # Honor env var fallback for FSDP relaunched processes (torchrun strips --local)
+    is_local = args.local or os.environ.get("AIFFEL_LOCAL_MODE") == "1"
+    set_local_mode(is_local)
     
     # Set random seed for reproducibility
     import random as py_random
@@ -868,8 +870,13 @@ if __name__ == "__main__":
         if num_gpus < 2:
             print(f"[WARNING] --fsdp requires 2+ GPUs. Current: {gpu_ids}. Proceeding single-GPU.")
         else:
+            # torchrun's argparse prefix-matches --local against --local-ranks-filter etc.
+            # Strip --local from argv and pass via env var; main process re-injects after relaunch.
+            filtered_argv = [a for a in sys.argv if a != "--local"]
+            if args.local:
+                os.environ["AIFFEL_LOCAL_MODE"] = "1"
             cmd = [sys.executable, "-m", "torch.distributed.run",
-                   f"--nproc_per_node={num_gpus}"] + sys.argv
+                   f"--nproc_per_node={num_gpus}"] + filtered_argv
             print(f"[FSDP] Auto-launching with torchrun: {' '.join(cmd)}")
             os.execvp(sys.executable, cmd)
             # execvp replaces process, never reaches here
