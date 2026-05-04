@@ -256,6 +256,63 @@ def run_training(args):
             # Return only loss (no logits to accumulate)
             return loss, None, labels
 
+        # ----- save/load overrides (Level 2 fix) -----
+        def _save_checkpoint(self, model, trial):
+            """Save checkpoint and additionally persist any custom heads
+            (log_variance_head etc.) so each per-epoch checkpoint is self-contained.
+            HF Trainer + PEFT only saves adapter weights by default."""
+            super()._save_checkpoint(model, trial)
+            # Determine checkpoint dir (matches HF Trainer internal logic)
+            try:
+                run_dir = self._get_output_dir(trial=trial)
+                ckpt_dir = os.path.join(run_dir, f"checkpoint-{self.state.global_step}")
+            except Exception as e:
+                if self.debug:
+                    print(f"[CustomTrainer] could not resolve checkpoint dir: {e}")
+                return
+            # Only rank 0 writes (avoid FSDP rank collisions)
+            if getattr(self.args, "process_index", 0) != 0:
+                return
+            try:
+                from model_saver import save_head_weights
+                save_head_weights(self.model, ckpt_dir)
+            except Exception as e:
+                print(f"[CustomTrainer] save_head_weights({ckpt_dir}) failed: {e}")
+
+        def _load_best_model(self):
+            """Override HF Trainer's _load_best_model which is broken for LoRA+FSDP.
+
+            HF Trainer's logic for FSDP expects ``pytorch_model_fsdp.bin`` which is
+            never produced when training a PEFT (LoRA) adapter, and the fallback
+            path in accelerate hits an unrelated peft/transformers ImportError.
+
+            Strategy: when LoRA+FSDP is active, skip the broken path. The best
+            checkpoint is preserved on disk under ``self.state.best_model_checkpoint``
+            so it can still be reloaded after training. Final post-training save
+            uses whatever state is currently in memory (last epoch). Pair with
+            ``--early_stopping_patience 0`` to bypass entirely."""
+            is_peft = (
+                hasattr(self.model, "peft_config")
+                or "Peft" in type(self.model).__name__
+            )
+            is_fsdp = bool(getattr(self.args, "fsdp", None))
+            if is_peft and is_fsdp:
+                if self.state.best_model_checkpoint:
+                    print(
+                        f"[CustomTrainer] LoRA+FSDP: skipping HF auto best-model load."
+                    )
+                    print(
+                        f"[CustomTrainer] Best checkpoint preserved at: "
+                        f"{self.state.best_model_checkpoint}"
+                    )
+                    print(
+                        "[CustomTrainer] Final save will use current (last epoch) state."
+                    )
+                else:
+                    print("[CustomTrainer] No best checkpoint recorded; nothing to load.")
+                return
+            return super()._load_best_model()
+
     # ==========================================================================
     # Training Logic
     # ==========================================================================
