@@ -1,13 +1,19 @@
 """
-Agent multi-turn dataset with role-based loss masking.
+Agent multi-turn dataset with turn-by-turn ShareGPT-style masking.
 
-Builds token sequences manually (no apply_chat_template) to handle
-the agent conversation structure: system -> user -> assistant/tool loops.
+Each multi-turn conversation in the source JSON is automatically expanded into
+N sub-instances (one per assistant turn). Each sub-instance contains all prior
+turns as context (masked) and only its final assistant message is trainable.
+
+This is the standard ShareGPT-style training pattern, equivalent to feeding
+prior turns as the prompt and letting the model generate the current assistant
+response — mirroring inference-time multi-turn behavior.
 
 Masking strategy:
-  - system, user, tool messages -> masked (IGNORE_INDEX)
-  - assistant messages           -> unmasked (loss computed)
-  - EOS token                    -> unmasked
+  - system, user, tool messages          -> masked (IGNORE_INDEX)
+  - prior assistant messages (context)   -> masked (IGNORE_INDEX)  ← key change
+  - last assistant message (target turn) -> unmasked (loss computed)
+  - EOS token                            -> unmasked
 
 Usage:
     --dataset_type agent_dataset --data_path formatted_data.json
@@ -15,6 +21,7 @@ Usage:
 
 import json
 import os
+import re
 
 import torch
 from torch.utils.data import Dataset, Subset
@@ -44,12 +51,100 @@ class AgentDataset(Dataset):
 
     TRAIN_ROLES = ("assistant",)
 
+    _SOLUTION_TAG_RE = re.compile(r"\[/?SOLUTION\]")
+
+    @classmethod
+    def _strip_orphan_solution(cls, content: str) -> str:
+        """Remove unmatched [SOLUTION] / [/SOLUTION] tokens via bracket matching.
+
+        Walks through `content` left-to-right matching each [SOLUTION] with the
+        next [/SOLUTION]. Balanced pairs are preserved intact; only orphan
+        opens (no matching close) and orphan closes (no preceding open) are
+        removed.
+
+        Examples:
+            "[SOLUTION]A[/SOLUTION]"                    -> unchanged
+            "[SOLUTION]A[/SOLUTION] x [SOLUTION]B"      -> "[SOLUTION]A[/SOLUTION] x B"
+            "[SOLUTION]A [SOLUTION]B[/SOLUTION]"        -> "A [SOLUTION]B[/SOLUTION]"
+            "[/SOLUTION]A[SOLUTION]B[/SOLUTION]"        -> "A[SOLUTION]B[/SOLUTION]"
+        """
+        matches = list(cls._SOLUTION_TAG_RE.finditer(content))
+        if not matches:
+            return content
+
+        stack = []  # spans of unmatched [SOLUTION] (open) tokens
+        orphan_closes = []  # spans of orphan [/SOLUTION] (close-before-open) tokens
+
+        for m in matches:
+            if m.group() == "[SOLUTION]":
+                stack.append((m.start(), m.end()))
+            else:  # "[/SOLUTION]"
+                if stack:
+                    stack.pop()  # matched pair, both kept
+                else:
+                    orphan_closes.append((m.start(), m.end()))
+
+        # Anything left in stack is orphan-open
+        to_remove = stack + orphan_closes
+        if not to_remove:
+            return content
+
+        # Remove from end to start to keep indices valid
+        to_remove.sort(key=lambda span: span[0], reverse=True)
+        new_content = content
+        for start, end in to_remove:
+            new_content = new_content[:start] + new_content[end:]
+        return new_content
+
     def __init__(self, file_path, tokenizer, max_length=4096):
         self.tokenizer = tokenizer
         self.max_length = max_length
 
         with open(file_path, "r", encoding="utf-8") as f:
-            self.data = json.load(f)
+            raw = json.load(f)
+
+        # Expand: 1 conversation -> N sub-instances (one per assistant turn).
+        # Sub-instance for assistant at index i contains messages[0..i] inclusive,
+        # where messages[i] is the trainable target. Earlier messages (including
+        # any prior assistant turns) become context and will be masked in
+        # _build_sequence().
+        #
+        # Additionally clean up orphan [SOLUTION] tokens in intermediate
+        # (non-final-of-original-conversation) assistant turns. The final
+        # assistant turn of the original conversation keeps its content
+        # untouched (it has properly balanced [SOLUTION] tags).
+        self.data = []
+        n_cleaned_msgs = 0
+        for inst in raw:
+            msgs = inst.get("messages", [])
+            for i, m in enumerate(msgs):
+                if m.get("role") != "assistant":
+                    continue
+                # Build cleaned sub-instance messages (copy + cleanup).
+                # Bracket-matching cleanup is safe for all assistant turns —
+                # balanced [SOLUTION]X[/SOLUTION] pairs are preserved.
+                cleaned_msgs = []
+                for j, mm in enumerate(msgs[: i + 1]):
+                    if mm.get("role") == "assistant":
+                        new_content = self._strip_orphan_solution(mm["content"])
+                        if new_content != mm["content"]:
+                            n_cleaned_msgs += 1
+                        cleaned_msgs.append({**mm, "content": new_content})
+                    else:
+                        cleaned_msgs.append(mm)
+                sub = {k: v for k, v in inst.items() if k != "messages"}
+                sub["_turn_idx"] = i
+                sub["messages"] = cleaned_msgs
+                self.data.append(sub)
+
+        print(
+            f"[AgentDataset] {len(raw)} conversations -> "
+            f"{len(self.data)} turn-instances (turn-by-turn expansion)"
+        )
+        print(
+            f"[AgentDataset] orphan [SOLUTION] tags stripped from "
+            f"{n_cleaned_msgs} intermediate-turn message copies"
+        )
 
         self._validate_data()
         self._resolve_special_ids()
@@ -104,15 +199,20 @@ class AgentDataset(Dataset):
         """
         Build the full token sequence and track role boundaries.
 
+        Turn-by-turn masking strategy:
+            Only the LAST assistant message in `messages` is treated as the
+            trainable target (boundary role = "assistant"). Any prior assistant
+            messages (from earlier turns) are treated as context and given the
+            boundary role "context", which is masked out by
+            build_labels_from_boundaries since it is not in TRAIN_ROLES.
+
         Sequence layout:
             <s> [SYSTEM_PROMPT] sys_content [/SYSTEM_PROMPT]
             [INST] user_content [/INST]
-            assistant_content          (contains [THINK], [EXECUTE], [SOLUTION])
+            assistant_content          (prior turn -> context, masked)
             tool_content               (contains [OBSERVATION])
-            assistant_content
-            tool_content
             ...
-            final_assistant_content
+            final_assistant_content    (target turn -> assistant, trainable)
             </s>
 
         If multiple system messages appear, <s> (BOS) is only added once
@@ -127,7 +227,15 @@ class AgentDataset(Dataset):
         boundaries = []
         has_bos = False
 
-        for msg in messages:
+        # Identify the last assistant index (the only trainable target).
+        # Earlier assistant messages are context (masked).
+        last_assist_idx = None
+        for j in range(len(messages) - 1, -1, -1):
+            if messages[j].get("role") == "assistant":
+                last_assist_idx = j
+                break
+
+        for i, msg in enumerate(messages):
             role = msg["role"]
             content = msg["content"]
             start = len(input_ids)
@@ -152,7 +260,14 @@ class AgentDataset(Dataset):
                 input_ids.extend(self._encode_text(content))
 
             end = len(input_ids)
-            boundaries.append((start, end, role))
+
+            # Only the last assistant turn is "assistant" (trainable).
+            # Prior assistant turns become "context" (masked, since "context"
+            # is not in TRAIN_ROLES).
+            if role == "assistant" and i != last_assist_idx:
+                boundaries.append((start, end, "context"))
+            else:
+                boundaries.append((start, end, role))
 
         eos_start = len(input_ids)
         input_ids.append(self.eos_id)
