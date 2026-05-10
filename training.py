@@ -748,7 +748,37 @@ def run_training(args):
             def on_train_begin(self, a, st, c, **kw): self._log("on_train_begin", st)
             def on_train_end(self, a, st, c, **kw):   self._log("on_train_end",   st)
         trainer.add_callback(_StageTraceCallback())
-        
+
+        # GPU memory usage callback — fires on each Trainer log event
+        # (i.e. every --logging_steps). Reports allocated/reserved per local rank.
+        class _GPUMemCallback(TrainerCallback):
+            def _report(self, st, tag):
+                if not torch.cuda.is_available():
+                    return
+                rank = int(os.environ.get("LOCAL_RANK", 0))
+                dev = torch.cuda.current_device()
+                alloc = torch.cuda.memory_allocated(dev) / 1024**3
+                resv  = torch.cuda.memory_reserved(dev) / 1024**3
+                peak  = torch.cuda.max_memory_allocated(dev) / 1024**3
+                total = torch.cuda.get_device_properties(dev).total_memory / 1024**3
+                step  = getattr(st, "global_step", None)
+                ep    = getattr(st, "epoch", None)
+                print(
+                    f"[GPU rank{rank} dev{dev}] {tag} step={step} epoch={ep} "
+                    f"alloc={alloc:6.2f} GB | resv={resv:6.2f} GB | peak={peak:6.2f} GB | "
+                    f"total={total:6.2f} GB ({100*alloc/total:.1f}%)",
+                    flush=True,
+                )
+            def on_log(self, a, st, c, **kw):         self._report(st, "on_log")
+            def on_step_end(self, a, st, c, **kw):
+                # report only every 50 steps to avoid log spam if logging_steps>1
+                if getattr(st, "global_step", 0) % 50 == 0:
+                    self._report(st, "every-50-step")
+            def on_epoch_end(self, a, st, c, **kw):   self._report(st, "epoch_end")
+            def on_train_begin(self, a, st, c, **kw): self._report(st, "train_begin")
+            def on_train_end(self, a, st, c, **kw):   self._report(st, "train_end")
+        trainer.add_callback(_GPUMemCallback())
+
         # Attach GDPO configuration to trainer
         trainer.gdpo_config = {
             "group_size": args.gdpo_group_size,
