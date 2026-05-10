@@ -273,31 +273,55 @@ def run_training(args):
             rank = getattr(self.args, "process_index", 0)
             print(f"[STAGE rank{rank}] _save_checkpoint START step={self.state.global_step}", flush=True)
 
-            # ALL ranks: capture head state to CPU BEFORE super (so we don't
-            # have to access FSDP-related state after super may have left it
-            # in an inconsistent state across ranks). This call must be
-            # synchronous across ranks since it walks into the model.
+            # ALL ranks: capture head state to CPU BEFORE super.
+            # Under root-FSDP wrap, the head's params share the root flat_param
+            # so a plain submodule.state_dict() returns sharded values. We must
+            # enter a FULL_STATE_DICT context (rank0_only=True, offload_to_cpu)
+            # so rank 0 collects unsharded head tensors. Non-rank-0 returns
+            # empty but still must enter the context (collective op).
             head_cpu_state = None
+            is_fsdp_active = bool(getattr(self.args, "fsdp", None))
             try:
-                inner = self.model
-                while hasattr(inner, "_fsdp_wrapped_module"):
-                    inner = inner._fsdp_wrapped_module
-                if hasattr(inner, "module"):
-                    inner = inner.module
-                if hasattr(inner, "base_model"):
-                    inner = inner.base_model
-                if hasattr(inner, "model"):
-                    inner = inner.model
-                if hasattr(inner, "log_variance_head"):
-                    head_cpu_state = {
-                        f"log_variance_head.{k}": v.detach().to("cpu").contiguous()
-                        for k, v in inner.log_variance_head.state_dict().items()
-                    }
-                    print(
-                        f"[STAGE rank{rank}] _save_checkpoint -> head state captured to CPU "
-                        f"({len(head_cpu_state)} tensors)",
-                        flush=True,
+                if is_fsdp_active:
+                    from torch.distributed.fsdp import (
+                        FullyShardedDataParallel as FSDP,
+                        StateDictType,
+                        FullStateDictConfig,
                     )
+                    cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+                    with FSDP.state_dict_type(self.model, StateDictType.FULL_STATE_DICT, cfg):
+                        full_sd = self.model.state_dict()
+                    if rank == 0:
+                        # Filter to head-only keys, normalize to 'log_variance_head.*'
+                        head_cpu_state = {}
+                        for k, v in full_sd.items():
+                            if "log_variance_head" not in k:
+                                continue
+                            idx = k.find("log_variance_head")
+                            head_cpu_state[k[idx:]] = v.detach().to("cpu").contiguous()
+                        print(
+                            f"[STAGE rank{rank}] _save_checkpoint -> head state gathered "
+                            f"({len(head_cpu_state)} tensors via FSDP FULL_STATE_DICT)",
+                            flush=True,
+                        )
+                else:
+                    inner = self.model
+                    if hasattr(inner, "module"):
+                        inner = inner.module
+                    if hasattr(inner, "base_model"):
+                        inner = inner.base_model
+                    if hasattr(inner, "model"):
+                        inner = inner.model
+                    if hasattr(inner, "log_variance_head"):
+                        head_cpu_state = {
+                            f"log_variance_head.{k}": v.detach().to("cpu").contiguous()
+                            for k, v in inner.log_variance_head.state_dict().items()
+                        }
+                        print(
+                            f"[STAGE rank{rank}] _save_checkpoint -> head state captured to CPU "
+                            f"({len(head_cpu_state)} tensors)",
+                            flush=True,
+                        )
             except Exception as e:
                 print(
                     f"[STAGE rank{rank}] _save_checkpoint -> head capture skipped: {e}",
