@@ -272,6 +272,38 @@ def run_training(args):
             """
             rank = getattr(self.args, "process_index", 0)
             print(f"[STAGE rank{rank}] _save_checkpoint START step={self.state.global_step}", flush=True)
+
+            # ALL ranks: capture head state to CPU BEFORE super (so we don't
+            # have to access FSDP-related state after super may have left it
+            # in an inconsistent state across ranks). This call must be
+            # synchronous across ranks since it walks into the model.
+            head_cpu_state = None
+            try:
+                inner = self.model
+                while hasattr(inner, "_fsdp_wrapped_module"):
+                    inner = inner._fsdp_wrapped_module
+                if hasattr(inner, "module"):
+                    inner = inner.module
+                if hasattr(inner, "base_model"):
+                    inner = inner.base_model
+                if hasattr(inner, "model"):
+                    inner = inner.model
+                if hasattr(inner, "log_variance_head"):
+                    head_cpu_state = {
+                        f"log_variance_head.{k}": v.detach().to("cpu").contiguous()
+                        for k, v in inner.log_variance_head.state_dict().items()
+                    }
+                    print(
+                        f"[STAGE rank{rank}] _save_checkpoint -> head state captured to CPU "
+                        f"({len(head_cpu_state)} tensors)",
+                        flush=True,
+                    )
+            except Exception as e:
+                print(
+                    f"[STAGE rank{rank}] _save_checkpoint -> head capture skipped: {e}",
+                    flush=True,
+                )
+
             print(f"[STAGE rank{rank}] _save_checkpoint -> super().__save_checkpoint() ENTER", flush=True)
             super()._save_checkpoint(model, trial)
             print(f"[STAGE rank{rank}] _save_checkpoint -> super().__save_checkpoint() RETURNED", flush=True)
@@ -283,17 +315,22 @@ def run_training(args):
                 if self.debug:
                     print(f"[CustomTrainer] could not resolve checkpoint dir: {e}", flush=True)
                 return
-            # Save head ONLY on rank 0 — must run while FSDP state is whatever
-            # super() left it (typically FULL_STATE_DICT after gather), because
-            # log_variance_head access works in that mode.
-            if rank == 0:
+            # Save head ONLY on rank 0 from the CPU state captured BEFORE super().
+            # No FSDP access here — pure file write of CPU tensors.
+            if rank == 0 and head_cpu_state:
                 try:
-                    from model_saver import save_head_weights
-                    print(f"[STAGE rank{rank}] _save_checkpoint -> save_head_weights ENTER", flush=True)
-                    save_head_weights(self.model, ckpt_dir)
-                    print(f"[STAGE rank{rank}] _save_checkpoint -> save_head_weights RETURNED", flush=True)
+                    from safetensors.torch import save_file as st_save_file
+                    heads_dir = os.path.join(ckpt_dir, "heads")
+                    os.makedirs(heads_dir, exist_ok=True)
+                    save_path = os.path.join(heads_dir, "log_variance_head.safetensors")
+                    print(f"[STAGE rank{rank}] _save_checkpoint -> head disk write ENTER", flush=True)
+                    st_save_file(head_cpu_state, save_path)
+                    print(
+                        f"[model_saver] Saved log_variance_head to {save_path}", flush=True
+                    )
+                    print(f"[STAGE rank{rank}] _save_checkpoint -> head disk write RETURNED", flush=True)
                 except Exception as e:
-                    print(f"[CustomTrainer] save_head_weights({ckpt_dir}) failed: {e}", flush=True)
+                    print(f"[CustomTrainer] head disk write failed: {e}", flush=True)
 
             # ALL ranks: reset FSDP state_dict_type back to LOCAL_STATE_DICT
             # so the next forward sees sharded params consistently. Without
