@@ -83,7 +83,7 @@ class Ministral3FileConfig:
         40: "[SOLUTION]",
         41: "[/SOLUTION]",
     }
-    PATCH_VERSION: int = 1
+    PATCH_VERSION: int = 2
     
     # === Model config ===
     PARAMS: str = "params.json"

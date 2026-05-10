@@ -74,6 +74,17 @@ def apply_patches(model_dir: str, patches: dict[int, str], patch_version: int) -
         if str_id in tc.get("added_tokens_decoder", {}):
             tc["added_tokens_decoder"][str_id]["content"] = new_name
 
+    # additional_special_tokens is a position-indexed array. The base tokenizer
+    # leaves the patched slots as <SPECIAL_N> placeholders; rewrite them so any
+    # consumer that reads this array (vLLM/mistral-common/etc.) sees the
+    # patched names too.
+    ast_list = tc.get("additional_special_tokens")
+    if isinstance(ast_list, list):
+        for tid, new_name in id_to_new.items():
+            if 0 <= tid < len(ast_list):
+                ast_list[tid] = new_name
+        tc["additional_special_tokens"] = ast_list
+
     tc["_agent_patch_version"] = patch_version
     _write_json(tc_path, tc)
 
