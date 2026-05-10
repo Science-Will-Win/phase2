@@ -858,112 +858,76 @@ def run_training(args):
                     except Exception as e:
                         print(f"[WARNING] adapter_config save failed: {e}", flush=True)
 
-                    # Save base + head as SHARDED safetensors (main model output)
-                    # — this is what downstream inference expects (vLLM-compatible
-                    # base format with model-XXXXX-of-YYYYY.safetensors + index.json).
-                    # LoRA params are excluded (saved separately above).
+                    # NOTE: post-training sharded base+head save is DISABLED for
+                    # FSDP+LoRA on PyTorch 2.12 nightly because FSDP1's
+                    # state_dict_type(FULL_STATE_DICT) gather is broken — it
+                    # silently truncates text transformer layers (only first
+                    # ~9 of 26 layers gathered). The HF Trainer's per-epoch
+                    # checkpoint already contains a complete FSDP-aware
+                    # pytorch_model_fsdp.bin. Convert it offline:
+                    #
+                    #   python data_formatting/convert_fsdp_checkpoint.py \\
+                    #       model/train/<exp>/checkpoint-<last>  \\
+                    #       model/train/<exp>/converted
+                    #
+                    # which produces proper sharded safetensors + adapter.
+                    # Auto-convert: load latest pytorch_model_fsdp.bin and write
+                    # sharded safetensors. FSDP-aware bin file is complete.
                     try:
-                        from collections import OrderedDict
-                        import json as _json
-                        import shutil as _shutil
+                        # find latest checkpoint dir
+                        ckpts = [
+                            os.path.join(final_output_dir, d)
+                            for d in os.listdir(final_output_dir)
+                            if d.startswith("checkpoint-")
+                        ]
+                        latest = max(
+                            ckpts,
+                            key=lambda p: int(p.rsplit("-", 1)[-1])
+                            if p.rsplit("-", 1)[-1].isdigit() else 0,
+                        ) if ckpts else None
 
-                        non_lora_state = OrderedDict(
-                            (k, v.detach().to("cpu").contiguous())
-                            for k, v in full_state.items()
-                            if "lora_" not in k
-                        )
-
-                        # Add missing weights from base model dir (e.g. multi_modal_projector)
-                        if base_model_dir:
-                            try:
-                                from model_saver import _get_missing_weights
-                                missing = _get_missing_weights(base_model_dir)
-                                for k, v in missing.items():
-                                    non_lora_state[k] = v.cpu().contiguous()
-                                if missing:
-                                    print(
-                                        f"[INFO] Added {len(missing)} missing base weights",
-                                        flush=True,
-                                    )
-                            except Exception as e:
-                                print(f"[WARNING] missing weight load failed: {e}", flush=True)
-
-                        # Apply key renaming (custom arch -> base model format)
-                        try:
-                            from model_saver import _rename_key, _split_into_shards
-                            renamed = OrderedDict(
-                                (_rename_key(k), v) for k, v in non_lora_state.items()
-                            )
-                        except Exception:
-                            renamed = non_lora_state
-
-                        # Shard by max_shard_bytes (5GB)
-                        max_shard_bytes = 5_000_000_000
-                        shards = _split_into_shards(renamed, max_shard_bytes)
-                        num_shards = len(shards)
-                        weight_map = {}
-                        total_size = 0
-                        print(
-                            f"[STAGE] sharded main+head save: {len(renamed)} tensors -> {num_shards} shard(s)",
-                            flush=True,
-                        )
-                        for i, shard in enumerate(shards):
-                            shard_name = f"model-{i+1:05d}-of-{num_shards:05d}.safetensors"
-                            shard_path = os.path.join(final_output_dir, shard_name)
-                            shard_size = sum(
-                                t.nelement() * t.element_size() for t in shard.values()
-                            )
-                            total_size += shard_size
+                        if latest and os.path.exists(
+                            os.path.join(latest, "pytorch_model_fsdp.bin")
+                        ):
                             print(
-                                f"[INFO] {shard_name}: {len(shard)} tensors, {shard_size/1e9:.2f} GB",
+                                f"[STAGE] auto-conversion: {latest} -> {final_output_dir}",
                                 flush=True,
                             )
-                            st_save_file(shard, shard_path)
-                            for k in shard:
-                                weight_map[k] = shard_name
-
-                        # index.json
-                        total_params = sum(
-                            t.nelement() for shard in shards for t in shard.values()
-                        )
-                        index = {
-                            "metadata": {
-                                "total_parameters": total_params,
-                                "total_size": total_size,
-                            },
-                            "weight_map": OrderedDict(sorted(weight_map.items())),
-                        }
-                        with open(
-                            os.path.join(final_output_dir, "model.safetensors.index.json"),
-                            "w",
-                        ) as f:
-                            _json.dump(index, f, indent=2)
-                        print(
-                            f"[INFO] sharded main+head saved: "
-                            f"{total_params:,} params, {total_size/1e9:.2f} GB total",
-                            flush=True,
-                        )
-
-                        # Copy config files from base model dir
-                        if base_model_dir:
-                            for fname in [
-                                "config.json",
-                                "generation_config.json",
-                                "preprocessor_config.json",
-                                "chat_template.jinja",
-                            ]:
-                                src = os.path.join(base_model_dir, fname)
-                                if os.path.exists(src):
-                                    _shutil.copy2(src, os.path.join(final_output_dir, fname))
-
-                        # Save tokenizer
-                        try:
-                            tokenizer.save_pretrained(final_output_dir)
-                        except Exception as e:
-                            print(f"[WARNING] tokenizer save failed: {e}", flush=True)
+                            # Import conversion function
+                            sys_path_added = False
+                            try:
+                                import sys as _sys
+                                _here = os.path.dirname(os.path.abspath(__file__))
+                                _conv_dir = os.path.join(_here, "data_formatting")
+                                if _conv_dir not in _sys.path:
+                                    _sys.path.insert(0, _conv_dir)
+                                    sys_path_added = True
+                                from convert_fsdp_checkpoint import convert as _convert_fsdp
+                                _convert_fsdp(
+                                    ckpt_dir=latest,
+                                    output_dir=final_output_dir,
+                                    base_model_dir=base_model_dir,
+                                    max_shard_bytes=5_000_000_000,
+                                )
+                                print(
+                                    f"[INFO] auto-conversion DONE: "
+                                    f"sharded safetensors in {final_output_dir}",
+                                    flush=True,
+                                )
+                            finally:
+                                if sys_path_added:
+                                    _sys.path.remove(_conv_dir)
+                        else:
+                            print(
+                                f"[WARNING] no pytorch_model_fsdp.bin found in "
+                                f"{latest or '<no checkpoints>'}, skipping auto-conversion",
+                                flush=True,
+                            )
                     except Exception as e:
                         print(
-                            f"[WARNING] sharded main+head save failed: {e}",
+                            f"[WARNING] auto-conversion failed: {e}\n"
+                            f"  manual fallback: python data_formatting/"
+                            f"convert_fsdp_checkpoint.py <ckpt> <output>",
                             flush=True,
                         )
             else:
