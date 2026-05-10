@@ -275,44 +275,6 @@ def run_training(args):
             print(f"[STAGE rank{rank}] _save_checkpoint -> super().__save_checkpoint() ENTER", flush=True)
             super()._save_checkpoint(model, trial)
             print(f"[STAGE rank{rank}] _save_checkpoint -> super().__save_checkpoint() RETURNED", flush=True)
-
-            # FSDP1 post-save state reset: revert to LOCAL_STATE_DICT so the
-            # next forward sees sharded params on all ranks (super may have
-            # left module in FULL_STATE_DICT after gathering for save).
-            try:
-                from torch.distributed.fsdp import (
-                    FullyShardedDataParallel as FSDP,
-                    StateDictType,
-                )
-                fsdp_modules = [
-                    m for m in self.model.modules() if isinstance(m, FSDP)
-                ]
-                if fsdp_modules:
-                    for m in fsdp_modules:
-                        FSDP.set_state_dict_type(m, StateDictType.LOCAL_STATE_DICT)
-                    print(
-                        f"[STAGE rank{rank}] _save_checkpoint -> FSDP reset to LOCAL_STATE_DICT (n={len(fsdp_modules)})",
-                        flush=True,
-                    )
-            except Exception as e:
-                print(
-                    f"[STAGE rank{rank}] _save_checkpoint -> FSDP reset SKIPPED: {e}",
-                    flush=True,
-                )
-
-            # Also explicit barrier so all ranks finish save before continuing
-            try:
-                if torch.distributed.is_initialized():
-                    torch.distributed.barrier()
-                    print(
-                        f"[STAGE rank{rank}] _save_checkpoint -> post-save barrier passed",
-                        flush=True,
-                    )
-            except Exception as e:
-                print(
-                    f"[STAGE rank{rank}] _save_checkpoint -> barrier skipped: {e}",
-                    flush=True,
-                )
             # Determine checkpoint dir (matches HF Trainer internal logic)
             try:
                 run_dir = self._get_output_dir(trial=trial)
@@ -321,17 +283,47 @@ def run_training(args):
                 if self.debug:
                     print(f"[CustomTrainer] could not resolve checkpoint dir: {e}", flush=True)
                 return
-            # Only rank 0 writes (avoid FSDP rank collisions)
-            if rank != 0:
-                print(f"[STAGE rank{rank}] _save_checkpoint END (non-rank0, skip head save)", flush=True)
-                return
+            # Save head ONLY on rank 0 — must run while FSDP state is whatever
+            # super() left it (typically FULL_STATE_DICT after gather), because
+            # log_variance_head access works in that mode.
+            if rank == 0:
+                try:
+                    from model_saver import save_head_weights
+                    print(f"[STAGE rank{rank}] _save_checkpoint -> save_head_weights ENTER", flush=True)
+                    save_head_weights(self.model, ckpt_dir)
+                    print(f"[STAGE rank{rank}] _save_checkpoint -> save_head_weights RETURNED", flush=True)
+                except Exception as e:
+                    print(f"[CustomTrainer] save_head_weights({ckpt_dir}) failed: {e}", flush=True)
+
+            # ALL ranks: reset FSDP state_dict_type back to LOCAL_STATE_DICT
+            # so the next forward sees sharded params consistently. Without
+            # this, super() may leave the module in FULL_STATE_DICT after
+            # save-time gather, causing the next forward to deadlock (rank0
+            # full vs rank1 sharded NCCL mismatch).
             try:
-                from model_saver import save_head_weights
-                print(f"[STAGE rank{rank}] _save_checkpoint -> save_head_weights ENTER", flush=True)
-                save_head_weights(self.model, ckpt_dir)
-                print(f"[STAGE rank{rank}] _save_checkpoint -> save_head_weights RETURNED", flush=True)
+                from torch.distributed.fsdp import (
+                    FullyShardedDataParallel as FSDP,
+                    StateDictType,
+                )
+                fsdp_modules = [m for m in self.model.modules() if isinstance(m, FSDP)]
+                if fsdp_modules:
+                    for m in fsdp_modules:
+                        FSDP.set_state_dict_type(m, StateDictType.LOCAL_STATE_DICT)
+                    print(
+                        f"[STAGE rank{rank}] _save_checkpoint -> FSDP reset to LOCAL_STATE_DICT (n={len(fsdp_modules)})",
+                        flush=True,
+                    )
             except Exception as e:
-                print(f"[CustomTrainer] save_head_weights({ckpt_dir}) failed: {e}", flush=True)
+                print(f"[STAGE rank{rank}] _save_checkpoint -> FSDP reset skipped: {e}", flush=True)
+
+            # ALL ranks: barrier so save+reset complete on all ranks before next step
+            try:
+                if torch.distributed.is_initialized():
+                    torch.distributed.barrier()
+                    print(f"[STAGE rank{rank}] _save_checkpoint -> post-save barrier passed", flush=True)
+            except Exception as e:
+                print(f"[STAGE rank{rank}] _save_checkpoint -> barrier skipped: {e}", flush=True)
+
             print(f"[STAGE rank{rank}] _save_checkpoint END", flush=True)
 
         def _load_best_model(self):
