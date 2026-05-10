@@ -788,36 +788,221 @@ def run_training(args):
 
         base_model_dir = file_config.BASE_PATH if file_config else None
 
+        # Detect FSDP wrapping for post-training save handling.
+        is_fsdp_wrapped = False
+        try:
+            from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+            is_fsdp_wrapped = any(isinstance(m, FSDP) for m in model.modules())
+        except Exception:
+            pass
+
         if args.use_lora:
-            # (a) LoRA adapter 분리 저장
             adapter_dir = os.path.join(final_output_dir, "lora_adapter")
-            print(f"[STAGE] (a) model.save_pretrained({adapter_dir}) ENTER", flush=True)
-            model.save_pretrained(adapter_dir)
-            print(f"[STAGE] (a) model.save_pretrained RETURNED", flush=True)
-            print(f"[INFO] LoRA adapter saved to {adapter_dir}", flush=True)
+            if is_fsdp_wrapped:
+                # FSDP-wrapped LoRA: gather full LoRA state on rank 0, then
+                # manually write adapter_model.safetensors + adapter_config.json.
+                # LoRA itself is small enough that sharding is unnecessary;
+                # PEFT's save_pretrained() trips over ShardedTensor, so we
+                # bypass it.
+                from torch.distributed.fsdp import (
+                    FullyShardedDataParallel as FSDP,
+                    StateDictType,
+                )
+                from torch.distributed.fsdp.fully_sharded_data_parallel import (
+                    FullStateDictConfig,
+                )
+                from safetensors.torch import save_file as st_save_file
 
-            # (b) Trained head weights → base model 디렉토리에 저장
-            if base_model_dir:
-                print(f"[STAGE] (b) save_head_weights ENTER", flush=True)
-                save_head_weights(model, base_model_dir)
-                print(f"[STAGE] (b) save_head_weights RETURNED", flush=True)
+                rank = trainer.args.process_index
+                print(f"[STAGE rank{rank}] (a) FSDP gather full state ENTER", flush=True)
+                cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+                with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, cfg):
+                    full_state = model.state_dict()
+                print(f"[STAGE rank{rank}] (a) FSDP gather full state RETURNED", flush=True)
 
-            # (c) LoRA를 base에 병합 + PeftModel 해제
-            # → state_dict 키가 원래 형식으로 복원 (model_saver 호환)
-            print(f"[STAGE] (c) merge_and_unload ENTER", flush=True)
-            model = model.merge_and_unload()
-            print(f"[STAGE] (c) merge_and_unload RETURNED", flush=True)
-            print("[INFO] LoRA merged and unloaded for base format save", flush=True)
+                if rank == 0:
+                    os.makedirs(adapter_dir, exist_ok=True)
 
-        print(f"[STAGE] save_model_as_base_format ENTER", flush=True)
-        save_model_as_base_format(
-            model=model,
-            tokenizer=tokenizer,
-            output_dir=final_output_dir,
-            base_model_dir=base_model_dir,
-            max_shard_bytes=5_000_000_000,
-        )
-        print(f"[STAGE] save_model_as_base_format RETURNED", flush=True)
+                    # Filter LoRA params only (lora_A, lora_B in the param name)
+                    adapter_state = {
+                        k: v.detach().to("cpu").contiguous()
+                        for k, v in full_state.items()
+                        if ("lora_" in k) or k.endswith(".lora_A.weight")
+                                          or k.endswith(".lora_B.weight")
+                    }
+                    print(
+                        f"[INFO] LoRA params extracted: {len(adapter_state)} tensors",
+                        flush=True,
+                    )
+
+                    # Write adapter_model.safetensors
+                    adapter_path = os.path.join(adapter_dir, "adapter_model.safetensors")
+                    st_save_file(adapter_state, adapter_path)
+                    print(f"[INFO] LoRA adapter saved to {adapter_path}", flush=True)
+
+                    # Write adapter_config.json from PeftModel's peft_config
+                    try:
+                        inner = model
+                        while hasattr(inner, "_fsdp_wrapped_module"):
+                            inner = inner._fsdp_wrapped_module
+                        if hasattr(inner, "module"):
+                            inner = inner.module
+                        if hasattr(inner, "peft_config"):
+                            cfg_dict = inner.peft_config
+                            adapter_name = next(iter(cfg_dict))
+                            cfg_dict[adapter_name].save_pretrained(adapter_dir)
+                            print(
+                                f"[INFO] adapter_config.json saved to {adapter_dir}",
+                                flush=True,
+                            )
+                    except Exception as e:
+                        print(f"[WARNING] adapter_config save failed: {e}", flush=True)
+
+                    # Save base + head as SHARDED safetensors (main model output)
+                    # — this is what downstream inference expects (vLLM-compatible
+                    # base format with model-XXXXX-of-YYYYY.safetensors + index.json).
+                    # LoRA params are excluded (saved separately above).
+                    try:
+                        from collections import OrderedDict
+                        import json as _json
+                        import shutil as _shutil
+
+                        non_lora_state = OrderedDict(
+                            (k, v.detach().to("cpu").contiguous())
+                            for k, v in full_state.items()
+                            if "lora_" not in k
+                        )
+
+                        # Add missing weights from base model dir (e.g. multi_modal_projector)
+                        if base_model_dir:
+                            try:
+                                from model_saver import _get_missing_weights
+                                missing = _get_missing_weights(base_model_dir)
+                                for k, v in missing.items():
+                                    non_lora_state[k] = v.cpu().contiguous()
+                                if missing:
+                                    print(
+                                        f"[INFO] Added {len(missing)} missing base weights",
+                                        flush=True,
+                                    )
+                            except Exception as e:
+                                print(f"[WARNING] missing weight load failed: {e}", flush=True)
+
+                        # Apply key renaming (custom arch -> base model format)
+                        try:
+                            from model_saver import _rename_key, _split_into_shards
+                            renamed = OrderedDict(
+                                (_rename_key(k), v) for k, v in non_lora_state.items()
+                            )
+                        except Exception:
+                            renamed = non_lora_state
+
+                        # Shard by max_shard_bytes (5GB)
+                        max_shard_bytes = 5_000_000_000
+                        shards = _split_into_shards(renamed, max_shard_bytes)
+                        num_shards = len(shards)
+                        weight_map = {}
+                        total_size = 0
+                        print(
+                            f"[STAGE] sharded main+head save: {len(renamed)} tensors -> {num_shards} shard(s)",
+                            flush=True,
+                        )
+                        for i, shard in enumerate(shards):
+                            shard_name = f"model-{i+1:05d}-of-{num_shards:05d}.safetensors"
+                            shard_path = os.path.join(final_output_dir, shard_name)
+                            shard_size = sum(
+                                t.nelement() * t.element_size() for t in shard.values()
+                            )
+                            total_size += shard_size
+                            print(
+                                f"[INFO] {shard_name}: {len(shard)} tensors, {shard_size/1e9:.2f} GB",
+                                flush=True,
+                            )
+                            st_save_file(shard, shard_path)
+                            for k in shard:
+                                weight_map[k] = shard_name
+
+                        # index.json
+                        total_params = sum(
+                            t.nelement() for shard in shards for t in shard.values()
+                        )
+                        index = {
+                            "metadata": {
+                                "total_parameters": total_params,
+                                "total_size": total_size,
+                            },
+                            "weight_map": OrderedDict(sorted(weight_map.items())),
+                        }
+                        with open(
+                            os.path.join(final_output_dir, "model.safetensors.index.json"),
+                            "w",
+                        ) as f:
+                            _json.dump(index, f, indent=2)
+                        print(
+                            f"[INFO] sharded main+head saved: "
+                            f"{total_params:,} params, {total_size/1e9:.2f} GB total",
+                            flush=True,
+                        )
+
+                        # Copy config files from base model dir
+                        if base_model_dir:
+                            for fname in [
+                                "config.json",
+                                "generation_config.json",
+                                "preprocessor_config.json",
+                                "chat_template.jinja",
+                            ]:
+                                src = os.path.join(base_model_dir, fname)
+                                if os.path.exists(src):
+                                    _shutil.copy2(src, os.path.join(final_output_dir, fname))
+
+                        # Save tokenizer
+                        try:
+                            tokenizer.save_pretrained(final_output_dir)
+                        except Exception as e:
+                            print(f"[WARNING] tokenizer save failed: {e}", flush=True)
+                    except Exception as e:
+                        print(
+                            f"[WARNING] sharded main+head save failed: {e}",
+                            flush=True,
+                        )
+            else:
+                # Non-FSDP path: original logic
+                print(f"[STAGE] (a) model.save_pretrained({adapter_dir}) ENTER", flush=True)
+                model.save_pretrained(adapter_dir)
+                print(f"[STAGE] (a) model.save_pretrained RETURNED", flush=True)
+                print(f"[INFO] LoRA adapter saved to {adapter_dir}", flush=True)
+
+                if base_model_dir:
+                    print(f"[STAGE] (b) save_head_weights ENTER", flush=True)
+                    save_head_weights(model, base_model_dir)
+                    print(f"[STAGE] (b) save_head_weights RETURNED", flush=True)
+
+                print(f"[STAGE] (c) merge_and_unload ENTER", flush=True)
+                model = model.merge_and_unload()
+                print(f"[STAGE] (c) merge_and_unload RETURNED", flush=True)
+                print("[INFO] LoRA merged and unloaded for base format save", flush=True)
+
+                print(f"[STAGE] save_model_as_base_format ENTER", flush=True)
+                save_model_as_base_format(
+                    model=model,
+                    tokenizer=tokenizer,
+                    output_dir=final_output_dir,
+                    base_model_dir=base_model_dir,
+                    max_shard_bytes=5_000_000_000,
+                )
+                print(f"[STAGE] save_model_as_base_format RETURNED", flush=True)
+        else:
+            # Non-LoRA path: full model save
+            print(f"[STAGE] save_model_as_base_format ENTER", flush=True)
+            save_model_as_base_format(
+                model=model,
+                tokenizer=tokenizer,
+                output_dir=final_output_dir,
+                base_model_dir=base_model_dir,
+                max_shard_bytes=5_000_000_000,
+            )
+            print(f"[STAGE] save_model_as_base_format RETURNED", flush=True)
         
         # Save token error tracking results (if enabled)
         if args.track_token_errors and hasattr(trainer, 'token_error_tracker'):
