@@ -261,23 +261,31 @@ def run_training(args):
             """Save checkpoint and additionally persist any custom heads
             (log_variance_head etc.) so each per-epoch checkpoint is self-contained.
             HF Trainer + PEFT only saves adapter weights by default."""
+            rank = getattr(self.args, "process_index", 0)
+            print(f"[STAGE rank{rank}] _save_checkpoint START step={self.state.global_step}", flush=True)
+            print(f"[STAGE rank{rank}] _save_checkpoint -> super().__save_checkpoint() ENTER", flush=True)
             super()._save_checkpoint(model, trial)
+            print(f"[STAGE rank{rank}] _save_checkpoint -> super().__save_checkpoint() RETURNED", flush=True)
             # Determine checkpoint dir (matches HF Trainer internal logic)
             try:
                 run_dir = self._get_output_dir(trial=trial)
                 ckpt_dir = os.path.join(run_dir, f"checkpoint-{self.state.global_step}")
             except Exception as e:
                 if self.debug:
-                    print(f"[CustomTrainer] could not resolve checkpoint dir: {e}")
+                    print(f"[CustomTrainer] could not resolve checkpoint dir: {e}", flush=True)
                 return
             # Only rank 0 writes (avoid FSDP rank collisions)
-            if getattr(self.args, "process_index", 0) != 0:
+            if rank != 0:
+                print(f"[STAGE rank{rank}] _save_checkpoint END (non-rank0, skip head save)", flush=True)
                 return
             try:
                 from model_saver import save_head_weights
+                print(f"[STAGE rank{rank}] _save_checkpoint -> save_head_weights ENTER", flush=True)
                 save_head_weights(self.model, ckpt_dir)
+                print(f"[STAGE rank{rank}] _save_checkpoint -> save_head_weights RETURNED", flush=True)
             except Exception as e:
-                print(f"[CustomTrainer] save_head_weights({ckpt_dir}) failed: {e}")
+                print(f"[CustomTrainer] save_head_weights({ckpt_dir}) failed: {e}", flush=True)
+            print(f"[STAGE rank{rank}] _save_checkpoint END", flush=True)
 
         def _load_best_model(self):
             """Override HF Trainer's _load_best_model which is broken for FSDP.
@@ -296,6 +304,8 @@ def run_training(args):
             state is currently in memory (last epoch). Pair with
             ``--early_stopping_patience 0`` for full bypass.
             """
+            rank = getattr(self.args, "process_index", 0)
+            print(f"[STAGE rank{rank}] _load_best_model ENTER", flush=True)
             is_fsdp = bool(getattr(self.args, "fsdp", None))
             if is_fsdp:
                 if self.state.best_model_checkpoint:
@@ -309,8 +319,12 @@ def run_training(args):
                         "[CustomTrainer] FSDP active: no best checkpoint recorded; nothing to load.",
                         flush=True,
                     )
+                print(f"[STAGE rank{rank}] _load_best_model EXIT (skipped)", flush=True)
                 return
-            return super()._load_best_model()
+            print(f"[STAGE rank{rank}] _load_best_model -> super()._load_best_model() ENTER", flush=True)
+            ret = super()._load_best_model()
+            print(f"[STAGE rank{rank}] _load_best_model -> super()._load_best_model() RETURNED", flush=True)
+            return ret
 
     # ==========================================================================
     # Training Logic
@@ -659,17 +673,21 @@ def run_training(args):
         trainer.heteroscedastic_T = args.heteroscedastic_T
         trainer.heteroscedastic_sequential = args.heteroscedastic_sequential
 
-        print("Starting training...")
+        print("Starting training...", flush=True)
         print_memory_stats("Before Trainer Loop (Pre-Optimizer Init)")
+        print("[STAGE] trainer.train() ENTER", flush=True)
         trainer.train()
-        
-        print(f"Saving fine-tuned model to {final_output_dir}")
-        
+        print("[STAGE] trainer.train() RETURNED", flush=True)
+
+        print(f"Saving fine-tuned model to {final_output_dir}", flush=True)
+
         # Clear GPU memory before saving to avoid file write issues
         if torch.cuda.is_available():
+            print("[STAGE] empty_cache + gc.collect ENTER", flush=True)
             torch.cuda.empty_cache()
             gc.collect()
-        
+            print("[STAGE] empty_cache + gc.collect DONE", flush=True)
+
         # Save model in base model format (compatible with vLLM without conversion)
         from model_saver import save_model_as_base_format, save_head_weights
 
@@ -678,18 +696,25 @@ def run_training(args):
         if args.use_lora:
             # (a) LoRA adapter 분리 저장
             adapter_dir = os.path.join(final_output_dir, "lora_adapter")
+            print(f"[STAGE] (a) model.save_pretrained({adapter_dir}) ENTER", flush=True)
             model.save_pretrained(adapter_dir)
-            print(f"[INFO] LoRA adapter saved to {adapter_dir}")
+            print(f"[STAGE] (a) model.save_pretrained RETURNED", flush=True)
+            print(f"[INFO] LoRA adapter saved to {adapter_dir}", flush=True)
 
             # (b) Trained head weights → base model 디렉토리에 저장
             if base_model_dir:
+                print(f"[STAGE] (b) save_head_weights ENTER", flush=True)
                 save_head_weights(model, base_model_dir)
+                print(f"[STAGE] (b) save_head_weights RETURNED", flush=True)
 
             # (c) LoRA를 base에 병합 + PeftModel 해제
             # → state_dict 키가 원래 형식으로 복원 (model_saver 호환)
+            print(f"[STAGE] (c) merge_and_unload ENTER", flush=True)
             model = model.merge_and_unload()
-            print("[INFO] LoRA merged and unloaded for base format save")
+            print(f"[STAGE] (c) merge_and_unload RETURNED", flush=True)
+            print("[INFO] LoRA merged and unloaded for base format save", flush=True)
 
+        print(f"[STAGE] save_model_as_base_format ENTER", flush=True)
         save_model_as_base_format(
             model=model,
             tokenizer=tokenizer,
@@ -697,6 +722,7 @@ def run_training(args):
             base_model_dir=base_model_dir,
             max_shard_bytes=5_000_000_000,
         )
+        print(f"[STAGE] save_model_as_base_format RETURNED", flush=True)
         
         # Save token error tracking results (if enabled)
         if args.track_token_errors and hasattr(trainer, 'token_error_tracker'):
