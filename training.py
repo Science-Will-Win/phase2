@@ -227,34 +227,34 @@ def run_training(args):
             """
             Custom prediction_step that avoids storing full outputs.
             Uses the same loss_handler as training for consistency.
-            
-            Key differences from super().prediction_step():
-            - Does NOT call super() which internally stores outputs/logits
-            - Uses the same loss_handler as training (MC sampling for heteroscedastic)
-            - Explicit memory cleanup (no backward() to trigger automatic cleanup)
             """
+            rank = getattr(self.args, "process_index", 0)
+            print(f"[STAGE rank{rank}] prediction_step ENTER step={self.state.global_step}", flush=True)
             model.eval()
             labels = inputs.get("labels")
-            
+
             with torch.no_grad():
-                # Use the same loss handler as training (MC sampling for heteroscedastic)
                 loss_result = self.loss_handler(model, inputs, self)
                 loss = loss_result.total_loss.detach()
-                
-                # Update token error tracker (from loss_result.outputs)
+
                 if hasattr(self, 'token_error_tracker') and loss_result.outputs is not None:
                     logits = loss_result.outputs.logits
                     if logits is not None and labels is not None:
-                        # Shift for next-token prediction (logits[i] predicts labels[i+1])
                         shift_logits = logits[..., :-1, :]
                         shift_labels = labels[..., 1:]
-                        
                         predicted_ids = shift_logits.argmax(dim=-1)
                         mask = shift_labels != -100
                         self.token_error_tracker.update(predicted_ids, shift_labels, mask)
-            
-            # Return only loss (no logits to accumulate)
+
+            print(f"[STAGE rank{rank}] prediction_step EXIT", flush=True)
             return loss, None, labels
+
+        def evaluate(self, *args, **kwargs):
+            rank = getattr(self.args, "process_index", 0)
+            print(f"[STAGE rank{rank}] evaluate ENTER", flush=True)
+            ret = super().evaluate(*args, **kwargs)
+            print(f"[STAGE rank{rank}] evaluate RETURNED metrics={ret}", flush=True)
+            return ret
 
         # ----- save/load overrides (Level 2 fix) -----
         def _save_checkpoint(self, model, trial):
@@ -629,6 +629,25 @@ def run_training(args):
         trainer.add_callback(epoch_summary_callback)
         if args.debug:
             print(f"[DEBUG] EpochSummaryCallback added (log_every_n_epochs={args.log_every_n_epochs})")
+
+        # Verbose stage-tracing callback (debug only)
+        from transformers import TrainerCallback
+        class _StageTraceCallback(TrainerCallback):
+            def _log(self, ev, st):
+                rank = int(os.environ.get("LOCAL_RANK", 0))
+                ep = getattr(st, "epoch", None)
+                step = getattr(st, "global_step", None)
+                print(f"[STAGE rank{rank}] CB:{ev} epoch={ep} step={step}", flush=True)
+            def on_epoch_begin(self, a, st, c, **kw): self._log("on_epoch_begin", st)
+            def on_epoch_end(self, a, st, c, **kw):   self._log("on_epoch_end",   st)
+            def on_step_begin(self, a, st, c, **kw):  self._log("on_step_begin",  st)
+            def on_step_end(self, a, st, c, **kw):    self._log("on_step_end",    st)
+            def on_evaluate(self, a, st, c, **kw):    self._log("on_evaluate",    st)
+            def on_save(self, a, st, c, **kw):        self._log("on_save",        st)
+            def on_log(self, a, st, c, **kw):         self._log("on_log",         st)
+            def on_train_begin(self, a, st, c, **kw): self._log("on_train_begin", st)
+            def on_train_end(self, a, st, c, **kw):   self._log("on_train_end",   st)
+        trainer.add_callback(_StageTraceCallback())
         
         # Attach GDPO configuration to trainer
         trainer.gdpo_config = {
