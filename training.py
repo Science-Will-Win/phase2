@@ -356,6 +356,24 @@ def run_training(args):
                 except Exception as e:
                     print(f"[CustomTrainer] head disk write failed: {e}", flush=True)
 
+            # rank 0: snapshot the launch-time argparse Namespace to args.json
+            # so a future `--resume_from_checkpoint <ckpt>` can reload all
+            # training settings automatically. Environment-only flags are
+            # excluded (different per machine / per launch).
+            if rank == 0 and getattr(self, "_cli_args", None) is not None:
+                try:
+                    import json as _json
+                    _BLACKLIST = {"debug", "fsdp", "gpu", "local",
+                                  "resume_from_checkpoint"}
+                    snap = {k: v for k, v in vars(self._cli_args).items()
+                            if k not in _BLACKLIST}
+                    sap = os.path.join(ckpt_dir, "args.json")
+                    with open(sap, "w", encoding="utf-8") as f:
+                        _json.dump(snap, f, indent=2, ensure_ascii=False)
+                    print(f"[CustomTrainer] args.json saved ({len(snap)} keys) to {sap}", flush=True)
+                except Exception as e:
+                    print(f"[CustomTrainer] args.json save failed: {e}", flush=True)
+
             # ALL ranks: reset FSDP state_dict_type back to LOCAL_STATE_DICT
             # so the next forward sees sharded params consistently. Without
             # this, super() may leave the module in FULL_STATE_DICT after
@@ -717,6 +735,7 @@ def run_training(args):
         trainer.processing_class = tokenizer # Ensure trainer has tokenizer for GDPO
         trainer.ref_model = ref_model # Attach ref_model for GDPO
         trainer.log_every_n_epochs = args.log_every_n_epochs  # Set epoch logging frequency
+        trainer._cli_args = args  # Attach launch-time argparse Namespace for args.json snapshot
         
         # Add EvalAccuracyCallback after trainer is created (needs trainer reference)
         if eval_dataset is not None:
@@ -779,6 +798,31 @@ def run_training(args):
             def on_train_end(self, a, st, c, **kw):   self._report(st, "train_end")
         trainer.add_callback(_GPUMemCallback())
 
+        # CUDA cache eviction callback — releases caching-allocator's
+        # reserved-but-unallocated blocks after eval/save/epoch boundaries.
+        # Prevents fragmentation-induced OOM at the eval->train transition
+        # (see OOM in log/train_20260510_195102.log: alloc 21.86 GB / resv
+        # 63.39 GB after eval, then 11 GB reserved-but-unalloc became
+        # unusable for the next 8 GB contiguous allocation).
+        class _CudaEmptyCacheCallback(TrainerCallback):
+            def _flush(self, tag, st):
+                if not torch.cuda.is_available():
+                    return
+                before = torch.cuda.memory_reserved() / 1024**3
+                torch.cuda.empty_cache()
+                after = torch.cuda.memory_reserved() / 1024**3
+                rank = int(os.environ.get("LOCAL_RANK", 0))
+                print(
+                    f"[CudaEmptyCache rank{rank}] {tag} step={getattr(st,'global_step',None)} "
+                    f"reserved {before:.2f} GB -> {after:.2f} GB "
+                    f"(freed {before-after:.2f} GB)",
+                    flush=True,
+                )
+            def on_evaluate(self, a, st, c, **kw):  self._flush("after_evaluate", st)
+            def on_save(self, a, st, c, **kw):      self._flush("after_save",     st)
+            def on_epoch_end(self, a, st, c, **kw): self._flush("after_epoch",    st)
+        trainer.add_callback(_CudaEmptyCacheCallback())
+
         # Attach GDPO configuration to trainer
         trainer.gdpo_config = {
             "group_size": args.gdpo_group_size,
@@ -824,8 +868,8 @@ def run_training(args):
 
         print("Starting training...", flush=True)
         print_memory_stats("Before Trainer Loop (Pre-Optimizer Init)")
-        print("[STAGE] trainer.train() ENTER", flush=True)
-        trainer.train()
+        print(f"[STAGE] trainer.train() ENTER (resume_from_checkpoint={args.resume_from_checkpoint})", flush=True)
+        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
         print("[STAGE] trainer.train() RETURNED", flush=True)
 
         print(f"Saving fine-tuned model to {final_output_dir}", flush=True)
@@ -1067,6 +1111,11 @@ if __name__ == "__main__":
                         help="Early stopping patience. Stop if val_loss doesn't improve for N evals. Default: 5")
     parser.add_argument("--stratify", type=str, default=None,
                         help="Data property name for stratified split (e.g., 'type', 'task'). None=random split")
+    parser.add_argument("--split_random_state", type=int, default=-1,
+                        help="train/val split sklearn random_state. -1 = pick a fresh "
+                             "random value at first launch and persist via args.json "
+                             "(so resume reproduces the exact split). Any non-negative "
+                             "int is used as-is.")
     parser.add_argument("--track_token_errors", action="store_true",
                         help="Track and save token-level prediction errors (validation only)")
     parser.add_argument("--log_every_n_epochs", type=int, default=1,
@@ -1074,10 +1123,15 @@ if __name__ == "__main__":
     # parser.add_argument("--output_dir", type=str, default="fine_tuned_model") # We override this now
     
     # Standard HF Save Strategy Arguments
-    parser.add_argument("--save_strategy", type=str, default="epoch", choices=["steps", "epoch", "no"], 
+    parser.add_argument("--save_strategy", type=str, default="epoch", choices=["steps", "epoch", "no"],
                         help="The checkpoint save strategy to use.")
-    parser.add_argument("--save_steps", type=int, default=500, 
+    parser.add_argument("--save_steps", type=int, default=500,
                         help="Save checkpoint every X updates steps.")
+    parser.add_argument("--resume_from_checkpoint", type=str, default=None,
+                        help="Resume training from an HF Trainer checkpoint directory. "
+                             "Restores optimizer/scheduler/RNG/trainer_state and adapter "
+                             "weights. Example: model/train/<run>/checkpoint-1931 . "
+                             "None = train from scratch.")
     
     parser.add_argument("--gradient_checkpointing", action="store_true",
                         help="Enable gradient checkpointing to reduce activation memory (~1/3) at cost of ~30%% slower training.")
@@ -1240,7 +1294,43 @@ if __name__ == "__main__":
                             choices=["none", "all", "lora_only"],
                             help="PEFT bias setting (default: 'none').")
 
+    # Auto-load args.json from a resume checkpoint BEFORE parse_args, so saved
+    # values become the new defaults for any flag the user does NOT pass on
+    # the CLI. Explicit CLI args still win (set_defaults only affects unfilled
+    # values during parse). Environment-only flags are excluded — always
+    # supplied per-launch.
+    if "--resume_from_checkpoint" in sys.argv:
+        try:
+            _idx = sys.argv.index("--resume_from_checkpoint") + 1
+            if _idx < len(sys.argv):
+                _ckpt = sys.argv[_idx]
+                _sap = os.path.join(_ckpt, "args.json")
+                if os.path.exists(_sap):
+                    import json as _json
+                    with open(_sap, "r", encoding="utf-8") as _f:
+                        _saved = _json.load(_f)
+                    _BLACKLIST = {"debug", "fsdp", "gpu", "local",
+                                  "resume_from_checkpoint", "data_path"}
+                    _saved_clean = {k: v for k, v in _saved.items()
+                                    if k not in _BLACKLIST}
+                    parser.set_defaults(**_saved_clean)
+                    print(f"[resume] loaded args from {_sap}: {len(_saved_clean)} keys")
+                else:
+                    print(f"[resume] WARNING: {_sap} not found, using CLI only")
+        except Exception as _e:
+            print(f"[resume] args.json auto-load failed: {_e}")
+
     args = parser.parse_args()
+
+    # If split_random_state was left at -1 (default, no CLI / no saved), pick
+    # a fresh random value now and store it back so the args.json snapshot at
+    # the next save will record the exact value used.
+    if getattr(args, "split_random_state", -1) == -1:
+        import random as _rand
+        args.split_random_state = _rand.randint(0, 2**31 - 1)
+        print(f"[split] random_state generated: {args.split_random_state}")
+    else:
+        print(f"[split] random_state = {args.split_random_state}")
 
     # Auto-relaunch with torchrun when --fsdp is specified but not already under torchrun
     if args.fsdp and "LOCAL_RANK" not in os.environ:

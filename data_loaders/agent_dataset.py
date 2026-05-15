@@ -332,14 +332,20 @@ def get_dataset(args, tokenizer):
 
     if val_ratio > 0 and len(full_dataset) > 1:
         indices = list(range(len(full_dataset)))
+        # split_random_state: pulled from args (training.py resolves -1 to a
+        # fresh random int and persists it via args.json for resume parity).
+        # Fallback to 42 only if args has no attribute at all (back-compat).
+        split_rs = getattr(args, "split_random_state", 42)
+        if split_rs is None or split_rs < 0:
+            split_rs = 42
         train_idx, val_idx = train_test_split(
-            indices, test_size=val_ratio, random_state=42,
+            indices, test_size=val_ratio, random_state=split_rs,
         )
         train_dataset = Subset(full_dataset, train_idx)
         eval_dataset = Subset(full_dataset, val_idx)
         print(
             f"[AgentDataset] split: train={len(train_idx)}, "
-            f"val={len(val_idx)} (ratio={val_ratio})"
+            f"val={len(val_idx)} (ratio={val_ratio}, random_state={split_rs})"
         )
         return train_dataset, eval_dataset
     else:
